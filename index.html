@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <title>WebGPU GraphCut Test</title>
+  </head>
+  <body>
+    <h1>WebGPU GraphCut テストページ</h1>
+    <button id="btnGraph">グラフ構築テスト</button>
+    <button id="btnCompute">WebGPU計算テスト</button>
+    <button id="btnGraphCut">GraphCut初期化</button>
+
+    <script type="module">
+      import {
+        initGraphCut,
+        testGraphConstruction,
+        testWebGPUComputation,
+      } from "./main.js";
+
+      document.getElementById("btnGraph").addEventListener(
+        "click",
+        async () => {
+          await testGraphConstruction();
+        },
+      );
+
+      document.getElementById("btnCompute").addEventListener(
+        "click",
+        async () => {
+          await testWebGPUComputation();
+        },
+      );
+
+      document.getElementById("btnGraphCut").addEventListener(
+        "click",
+        async () => {
+          await initGraphCut();
+        },
+      );
+    </script>
+  </body>
+</html>
