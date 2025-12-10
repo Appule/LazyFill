@@ -6,35 +6,21 @@
   </head>
   <body>
     <h1>WebGPU GraphCut テストページ</h1>
-    <button id="btnGraph">グラフ構築テスト</button>
-    <button id="btnCompute">WebGPU計算テスト</button>
-    <button id="btnGraphCut">GraphCut初期化</button>
+    <button id="btnTest">テスト</button>
+    <hr>
+    <input type="file" id="fileInput" accept="image/*">
+    <br><br>
+    <canvas id="canvas"></canvas>
 
     <script type="module">
       import {
-        initGraphCut,
-        testGraphConstruction,
-        testWebGPUComputation,
+        testImgProc,
       } from "./main.js";
 
-      document.getElementById("btnGraph").addEventListener(
+      document.getElementById("btnTest").addEventListener(
         "click",
         async () => {
-          await testGraphConstruction();
-        },
-      );
-
-      document.getElementById("btnCompute").addEventListener(
-        "click",
-        async () => {
-          await testWebGPUComputation();
-        },
-      );
-
-      document.getElementById("btnGraphCut").addEventListener(
-        "click",
-        async () => {
-          await initGraphCut();
+          await testImgProc();
         },
       );
     </script>

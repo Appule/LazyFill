@@ -1,4 +1,29 @@
 /**
+ * WebGPU を初期化してアダプタとデバイスを返します。
+ * @async
+ * @function initWebGPU
+ * @throws {Error} WebGPU がサポートされていない場合、または初期化に失敗した場合
+ * @returns {Promise<{adapter: GPUAdapter, device: GPUDevice}>}
+ */
+export async function initWebGPU() {
+  if (!navigator.gpu) {
+    throw new Error("WebGPU がサポートされていません");
+  }
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    throw new Error("GPU アダプタの取得に失敗しました");
+  }
+
+  const device = await adapter.requestDevice();
+  if (!device) {
+    throw new Error("GPU デバイスの取得に失敗しました");
+  }
+
+  return { adapter, device };
+}
+
+/**
  * GPU バッファを生成する共通関数
  * @param {GPUDevice} device - WebGPU のデバイスオブジェクト
  * @param {TypedArray} data - 初期化するデータ配列 (Float32Array, Uint32Array など)
@@ -47,14 +72,14 @@ export function createPipeline(device, wgslCode, entryPoint = 'main') {
  * @param {GPUDevice} device - WebGPU デバイス
  * @param {GPUComputePipeline} pipeline - コンピュートパイプライン
  * @param {GPUBindGroup} bindGroup - バインドグループ
- * @param {number} workgroups - dispatchWorkgroups 数
+ * @param {Array} workgroups - dispatchWorkgroups 数 [x, y, z]
  */
 export function runKernel(device, pipeline, bindGroup, workgroups) {
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(workgroups);
+  passEncoder.dispatchWorkgroups(...workgroups);
   passEncoder.end();
   device.queue.submit([commandEncoder.finish()]);
 }
@@ -88,7 +113,6 @@ export async function readBuffer(device, buffer, ArrayType, length) {
  * @param {GPUDevice} device
  * @param {GPUComputePipeline} pipeline
  * @param {Object} bindingMap - { [bindingNumber]: GPUBuffer } の形で渡す
- *                              例: { 0: buffers.d_u, 1: buffers.d_p, 10: paramsBuffer }
  * @returns {GPUBindGroup}
  */
 export function createBindGroupWithBindings(device, pipeline, bindingMap) {
