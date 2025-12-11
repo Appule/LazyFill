@@ -26,22 +26,32 @@ export async function initWebGPU() {
 /**
  * GPU バッファを生成する共通関数
  * @param {GPUDevice} device - WebGPU のデバイスオブジェクト
- * @param {TypedArray} data - 初期化するデータ配列 (Float32Array, Uint32Array など)
- * @param {number} [usage=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST] - バッファの利用用途 (STORAGE, COPY_SRC, COPY_DST など)
+ * @param {TypedArray|ArrayBuffer} data - 初期化するデータ (Float32Array, Uint32Array, ArrayBuffer など)
+ * @param {number} [usage=GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST] - バッファの利用用途
  * @returns {GPUBuffer} - 初期化済みの GPUBuffer
  */
 export function createBuffer(device, data, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST) {
-  const size = Math.max(4, data.byteLength);
-  const buffer = device.createBuffer({
-    size,
-    usage,
-    mappedAtCreation: true,
-  });
-  const writeArray = new data.constructor(buffer.getMappedRange());
-  writeArray.set(data);
+  const byteLength = data.byteLength; // TypedArray / ArrayBuffer
+  const size = Math.max(4, byteLength);
+
+  const buffer = device.createBuffer({ size, usage, mappedAtCreation: true, });
+  const mappedRange = buffer.getMappedRange();
+
+  if (ArrayBuffer.isView(data)) {
+    // TypedArray
+    const writeArray = new data.constructor(mappedRange);
+    writeArray.set(data);
+  } else if (data instanceof ArrayBuffer) {
+    // ArrayBuffer
+    new Uint8Array(mappedRange).set(new Uint8Array(data));
+  } else {
+    throw new Error("data must be a TypedArray or ArrayBuffer");
+  }
+
   buffer.unmap();
   return buffer;
 }
+
 
 /**
  * パスからwgslコードを取得
@@ -69,17 +79,19 @@ export function createPipeline(device, wgslCode, entryPoint = 'main') {
 
 /**
  * カーネル実行関数
- * @param {GPUDevice} device - WebGPU デバイス
- * @param {GPUComputePipeline} pipeline - コンピュートパイプライン
- * @param {GPUBindGroup} bindGroup - バインドグループ
- * @param {Array} workgroups - dispatchWorkgroups 数 [x, y, z]
+ * @param {Array<GPUDevice>} device - WebGPU デバイス
+ * @param {Array<GPUComputePipeline>} pipelines - コンピュートパイプライン
+ * @param {Array<GPUBindGroup>} bindGroups - バインドグループ
+ * @param {Array<Array<Number>>} workgroups - dispatchWorkgroups 数 [x, y, z]
  */
-export function runKernel(device, pipeline, bindGroup, workgroups) {
+export function runKernel(device, pipelines, bindGroups, workgroups) {
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();
-  passEncoder.setPipeline(pipeline);
-  passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(...workgroups);
+  for (let i = 0; i < pipelines.length; i++) {
+    passEncoder.setPipeline(pipelines[i]);
+    passEncoder.setBindGroup(0, bindGroups[i]);
+    passEncoder.dispatchWorkgroups(...workgroups[i]);
+  }
   passEncoder.end();
   device.queue.submit([commandEncoder.finish()]);
 }

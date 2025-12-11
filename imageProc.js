@@ -1,6 +1,6 @@
 import { initWebGPU, createBuffer, loadWGSL, createPipeline, runKernel, readBuffer, createBindGroupWithBindings, } from './wgpuUtils.js';
 
-export async function rgbaToGrayscale(rgbaFlat, wgslPath = 'shaders/grayscale.wgsl') {
+export async function imageProc(rgbaFlat, width, height) {
   const { adapter, device } = await initWebGPU();
 
   if (rgbaFlat.length % 4 !== 0) {
@@ -21,27 +21,60 @@ export async function rgbaToGrayscale(rgbaFlat, wgslPath = 'shaders/grayscale.wg
   // 出力用バッファ (RGBA packed u32)
   const outPacked = new Uint32Array(pixelCount);
 
-  const rgbaBuffer = createBuffer(device, rgbaPacked, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const outBuffer = createBuffer(device, outPacked, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const pingBuffer = createBuffer(device, rgbaPacked, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
+  const pongBuffer = createBuffer(device, outPacked, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
 
-  const paramsData = new Uint32Array([pixelCount]);
+  const paramsData = new ArrayBuffer(16);
+  const view = new DataView(paramsData);
+  view.setUint32(0, width, true);   // width
+  view.setUint32(4, height, true);  // height
+  view.setUint32(8, pixelCount, true);  // length
+  view.setFloat32(12, 1.0, true);   // scl
   const paramsBuffer = createBuffer(device, paramsData, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
-  const wgslCode = await loadWGSL(wgslPath);
-  const pipeline = createPipeline(device, wgslCode, 'main');
+  const wgslHeader = await loadWGSL('shaders/header.wgsl');
+  const wgslCodeGray = await loadWGSL('shaders/rgbaToGray_f32.wgsl');
+  const wgslCodeGau = await loadWGSL('shaders/gaussian_f32.wgsl');
+  const wgslCodeLap = await loadWGSL('shaders/laplacian_f32.wgsl');
+  const wgslCodeInt = await loadWGSL('shaders/intensity_f32.wgsl');
+  const wgslCodePack = await loadWGSL('shaders/f32ToPacked_u32.wgsl');
+  const pipelines = [
+    createPipeline(device, wgslHeader + wgslCodeGray, 'main'),
+    createPipeline(device, wgslHeader + wgslCodeGau, 'main'),
+    createPipeline(device, wgslHeader + wgslCodeLap, 'main'),
+    createPipeline(device, wgslHeader + wgslCodeInt, 'main'),
+    createPipeline(device, wgslHeader + wgslCodePack, 'main'),
+  ];
 
-  const bindGroup = createBindGroupWithBindings(device, pipeline, {
-    0: rgbaBuffer,
-    1: outBuffer,
-    2: paramsBuffer,
-  });
+  const bindGroups = [
+    createBindGroupWithBindings(device, pipelines[0], {
+      0: paramsBuffer, 1: pingBuffer, 2: pongBuffer,
+    }),
+    createBindGroupWithBindings(device, pipelines[1], {
+      0: paramsBuffer, 1: pongBuffer, 2: pingBuffer,
+    }),
+    createBindGroupWithBindings(device, pipelines[2], {
+      0: paramsBuffer, 1: pingBuffer, 2: pongBuffer,
+    }),
+    createBindGroupWithBindings(device, pipelines[3], {
+      0: paramsBuffer, 1: pongBuffer, 2: pingBuffer,
+    }),
+    createBindGroupWithBindings(device, pipelines[4], {
+      0: paramsBuffer, 1: pingBuffer, 2: pongBuffer,
+    }),
+  ];
 
-  const workgroupSize = 256;
-  const workgroups = Math.ceil(pixelCount / workgroupSize);
-  runKernel(device, pipeline, bindGroup, [workgroups, 1, 1]);
+  const workgroups = [
+    [Math.ceil(pixelCount / 256), 1, 1],
+    [Math.ceil(width / 16), (height / 16), 1],
+    [Math.ceil(width / 16), (height / 16), 1],
+    [Math.ceil(pixelCount / 256), 1, 1],
+    [Math.ceil(pixelCount / 64), 1, 1],
+  ];
+  await runKernel(device, pipelines, bindGroups, workgroups);
 
   // 結果読み出し
-  const outU32 = await readBuffer(device, outBuffer, Uint32Array, pixelCount);
+  const outU32 = await readBuffer(device, pongBuffer, Uint32Array, pixelCount);
 
   // RGBA形式に展開
   const outU8 = new Uint8Array(pixelCount * 4);
