@@ -6,10 +6,10 @@ var<storage, read_write> outputLuma: array<f32>;
 
 fn unpack_rgba(px: u32) -> vec4<f32> {
   // u32 の各バイトに RGBA
-  let r: f32 = f32((px >> 0u)  & 0xFFu) / 256.0;
-  let g: f32 = f32((px >> 8u)  & 0xFFu) / 256.0;
-  let b: f32 = f32((px >> 16u) & 0xFFu) / 256.0;
-  let a: f32 = f32((px >> 24u) & 0xFFu) / 256.0;
+  let r: f32 = f32((px >> 0u)  & 0xFFu) / 255.0;
+  let g: f32 = f32((px >> 8u)  & 0xFFu) / 255.0;
+  let b: f32 = f32((px >> 16u) & 0xFFu) / 255.0;
+  let a: f32 = f32((px >> 24u) & 0xFFu) / 255.0;
   return vec4<f32>(r, g, b, a);
 }
 

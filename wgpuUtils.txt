@@ -6,6 +6,6 @@ initWebGPU(): Promise<{adapter:GPUAdapter,device:GPUDevice}> // WebGPU初期化�
 createBuffer(device,data,usage): GPUBuffer // TypedArrayからGPUBuffer生成
 loadWGSL(path): Promise<string> // WGSLコードを取得
 createPipeline(device,wgslCode,entryPoint='main'): GPUComputePipeline // ComputePipeline生成
-runKernel(device,pipeline,bindGroup,workgroups/*dispatchWorkgroups数 [x, y, z]*/): void // カーネル実行
+runKernel(device,pipelines/*[pipeline]*/,bindGroups/*[bindGroup]*/,workgroups/*dispatchWorkgroups数[[x, y, z]]*/): void // カーネル実行
 readBuffer(device,buffer,ArrayType,length): Promise<TypedArray> // GPUBuffer内容をCPU配列へコピー
 createBindGroupWithBindings(device,pipeline,bindingMap/*{ [bindingNumber]: GPUBuffer }*/): GPUBindGroup // bindingMapからBindGroup生成

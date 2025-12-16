@@ -1,28 +1,29 @@
 <!DOCTYPE html>
 <html lang="ja">
-  <head>
-    <meta charset="UTF-8">
-    <title>WebGPU GraphCut Test</title>
-  </head>
-  <body>
-    <h1>WebGPU GraphCut テストページ</h1>
-    <button id="btnTest">テスト</button>
-    <hr>
-    <input type="file" id="fileInput" accept="image/*">
-    <br><br>
-    <canvas id="canvas"></canvas>
 
-    <script type="module">
-      import {
-        testImgProc,
-      } from "./main.js";
+<head>
+  <meta charset="UTF-8">
+  <title>GraphCut</title>
+</head>
 
-      document.getElementById("btnTest").addEventListener(
-        "click",
-        async () => {
-          await testImgProc();
-        },
-      );
-    </script>
-  </body>
+<body>
+  <h1>GraphCut</h1>
+  <input type="file" id="fileInput">
+
+  <button id="btnFg">前景</button> <!-- btnFg -->
+  <button id="btnBg">背景</button> <!-- btnBg -->
+  <button id="btnRun">実行</button> <!-- btnRun -->
+
+  <div style="position: relative;">
+    <canvas id="canvasInput"></canvas>
+    <canvas id="canvasMarker" style="position: absolute; left: 0; top: 0;"></canvas>
+  </div>
+
+  <canvas id="canvasOutput"></canvas> <!-- 結果表示 -->
+  
+  <script type="module">
+    import { main } from "./main.js";
+    main();
+  </script>
+</body>
 </html>

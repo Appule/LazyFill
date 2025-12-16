@@ -26,10 +26,10 @@ export async function imageProc(rgbaFlat, width, height) {
 
   const paramsData = new ArrayBuffer(16);
   const view = new DataView(paramsData);
-  view.setUint32(0, width, true);   // width
-  view.setUint32(4, height, true);  // height
-  view.setUint32(8, pixelCount, true);  // length
-  view.setFloat32(12, 1.0, true);   // scl
+  view.setUint32(0, width, true);      // width
+  view.setUint32(4, height, true);     // height
+  view.setUint32(8, pixelCount, true); // length
+  view.setFloat32(12, 1.0, true);      // LoG scale
   const paramsBuffer = createBuffer(device, paramsData, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
   const wgslHeader = await loadWGSL('shaders/header.wgsl');
@@ -66,8 +66,8 @@ export async function imageProc(rgbaFlat, width, height) {
 
   const workgroups = [
     [Math.ceil(pixelCount / 256), 1, 1],
-    [Math.ceil(width / 16), (height / 16), 1],
-    [Math.ceil(width / 16), (height / 16), 1],
+    [Math.ceil(width / 16), Math.ceil(height / 16), 1],
+    [Math.ceil(width / 16), Math.ceil(height / 16), 1],
     [Math.ceil(pixelCount / 256), 1, 1],
     [Math.ceil(pixelCount / 64), 1, 1],
   ];
