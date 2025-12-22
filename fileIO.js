@@ -85,3 +85,35 @@ export function drawFloatArrayToCanvas(canvas, float32Array, width, height, norm
 
   ctx.putImageData(imageData, 0, 0);
 }
+
+
+// 画像データをグレースケール(輝度)に変換
+export function convertToGrayscale(data) {
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    data[i] = y;     // R
+    data[i + 1] = y; // G
+    data[i + 2] = y; // B
+  }
+}
+
+// Canvasを作成してダウンロード
+export function downloadBufferAsImage(width, height, renderCallback, filename) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(width, height);
+
+  renderCallback(imgData.data);
+
+  ctx.putImageData(imgData, 0, 0);
+
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}

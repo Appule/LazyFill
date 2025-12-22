@@ -19,33 +19,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   
   // Can I push to Right (idx+1)? (Residual: Cap - Flow > 0)
   if (gid.x + 1u < w) {
-      if (caps[idx * 2u] - flow[idx * 2u] > 0.0001) {
-          let nd = dist_in[idx + 1u];
-          if (nd != 1000000u) { best = min(best, nd + 1u); }
-      }
+    if (caps[idx * 2u] - flow[idx * 2u] > 0.0001) {
+      let nd = dist_in[idx + 1u];
+      if (nd != 1000000u) { best = min(best, nd + 1u); }
+    }
   }
   // Can I push to Down (idx+w)?
   if (gid.y + 1u < h_dim) {
-      if (caps[idx * 2u + 1u] - flow[idx * 2u + 1u] > 0.0001) {
-          let nd = dist_in[idx + w];
-          if (nd != 1000000u) { best = min(best, nd + 1u); }
-      }
+    if (caps[idx * 2u + 1u] - flow[idx * 2u + 1u] > 0.0001) {
+      let nd = dist_in[idx + w];
+      if (nd != 1000000u) { best = min(best, nd + 1u); }
+    }
   }
   // Can I push to Left (idx-1)? (Residual: Cap + Flow > 0)
   if (gid.x > 0u) {
-      let n_idx = idx - 1u;
-      if (caps[n_idx * 2u] + flow[n_idx * 2u] > 0.0001) {
-          let nd = dist_in[n_idx];
-          if (nd != 1000000u) { best = min(best, nd + 1u); }
-      }
+    let n_idx = idx - 1u;
+    if (caps[n_idx * 2u] + flow[n_idx * 2u] > 0.0001) {
+      let nd = dist_in[n_idx];
+      if (nd != 1000000u) { best = min(best, nd + 1u); }
+    }
   }
   // Can I push to Up (idx-w)?
   if (gid.y > 0u) {
-      let n_idx = idx - w;
-      if (caps[n_idx * 2u + 1u] + flow[n_idx * 2u + 1u] > 0.0001) {
-          let nd = dist_in[n_idx];
-          if (nd != 1000000u) { best = min(best, nd + 1u); }
-      }
+    let n_idx = idx - w;
+    if (caps[n_idx * 2u + 1u] + flow[n_idx * 2u + 1u] > 0.0001) {
+      let nd = dist_in[n_idx];
+      if (nd != 1000000u) { best = min(best, nd + 1u); }
+    }
   }
   dist_out[idx] = best;
 }

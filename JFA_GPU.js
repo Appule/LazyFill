@@ -1,118 +1,132 @@
-// webgpuJFA.js
-import {
-  initWebGPU,
-  createBuffer,
-  loadWGSL,
-  createPipeline,
-  runKernel,
-  readBuffer,
-  createBindGroupWithBindings,
-} from './wgpuUtils.js';
+import { initWebGPU, createBuffer, loadWGSL, createPipeline, runKernel, readBuffer, createBindGroupWithBindings } from './wgpuUtils.js';
 
 /**
- * Run Jump Flooding on GPU to compute nearestSeedIndex, labelMap, distanceMap.
- * @param {number} width
- * @param {number} height
- * @param {Int32Array} mask - values: 2(fg), 1(bg), -1(undefined)
- * @returns {Promise<{ nearestSeedIndex:Int32Array, labelMap:Int32Array, distanceMap:Float32Array }>}
+ * Jump Flooding Algorithmを実行し、最近傍ラベルマップと距離マップを計算する
+ * @param {number} width 画像幅
+ * @param {number} height 画像高さ
+ * @param {ArrayLike} labels ラベルデータ (0:Unknown, 1:BG, 2:FG などを想定)
+ * @returns {Promise<{nearestLabelMap: Uint8Array, distanceMap: Float32Array}>}
  */
-export async function runJumpFloodingWebGPU(width, height, mask) {
-  const { adapter, device } = await initWebGPU();
-  const N = width * height;
+export async function runJumpFloodingWebGPU(width, height, labels) {
+  const { device } = await initWebGPU();
 
-  // Directions (8-neighborhood). Packed as vec2<i32>[] in WGSL storage
-  const directions = [
-    { dx: 1, dy: 0 },   // E
-    { dx: -1, dy: 0 },  // W
-    { dx: 0, dy: 1 },   // S
-    { dx: 0, dy: -1 },  // N
-    { dx: 1, dy: 1 },   // SE
-    { dx: 1, dy: -1 },  // NE
-    { dx: -1, dy: 1 },  // SW
-    { dx: -1, dy: -1 }, // NW
-  ];
-  const dirArray = new Int32Array(directions.flatMap(d => [d.dx, d.dy]));
+  // --- 1. WGSLロード ---
+  const initWgsl = await loadWGSL('./shaders/jfa_init.wgsl');
+  const stepWgsl = await loadWGSL('./shaders/jfa_step.wgsl');
+  const finalWgsl = await loadWGSL('./shaders/jfa_final.wgsl');
 
-  // WGSL shaders
-  const initWGSL = await loadWGSL('./shaders/jfa_init.wgsl');
-  const stepWGSL = await loadWGSL('./shaders/jfa_step.wgsl');
+  // --- 2. パイプライン作成 ---
+  const pipelines = {
+    init: createPipeline(device, initWgsl, 'main'),
+    step: createPipeline(device, stepWgsl, 'main'),
+    final: createPipeline(device, finalWgsl, 'main'),
+  };
 
-  const initPipeline = createPipeline(device, initWGSL, 'main');
-  const stepPipeline = createPipeline(device, stepWGSL, 'main');
+  const numPixels = width * height;
+  const workgroups = [Math.ceil(width / 16), Math.ceil(height / 16), 1];
 
-  // Buffers
-  const maskBuf = createBuffer(device, mask, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const dirBuf = createBuffer(device, dirArray, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  const uniformInit = createBuffer(device, new Int32Array([width, height, N]), GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
+  // --- 3. バッファ作成 ---
+  // Params: [width, height, step_size, padding]
+  const paramsArray = new Float32Array([width, height, 0, 0]);
+  const paramsBuffer = createBuffer(device, paramsArray, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
-  // Double buffers for nearest/label/distance (ping-pong per iteration)
-  const nearestA = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-  const nearestB = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
+  // Input Labels
+  const labelInputBuffer = createBuffer(device, new Uint32Array(labels), GPUBufferUsage.STORAGE);
 
-  const labelA = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-  const labelB = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
+  // JFA Ping-Pong Buffers
+  // 各ピクセル: struct { seed_x: i32, seed_y: i32, label: u32, padding: u32 }
+  // Int32Array (4 elements per pixel)
+  const jfaBufferA = createBuffer(device, new Int32Array(numPixels * 4), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const jfaBufferB = createBuffer(device, new Int32Array(numPixels * 4), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
 
-  const distA = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-  const distB = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
+  // Output Buffers
+  const nearestLabelBuffer = createBuffer(device, new Uint32Array(numPixels), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+  const distanceBuffer = createBuffer(device, new Int32Array(numPixels), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
 
-  // For step kernel uniforms: width,height,N, jump, directionsLen
-  const stepUniform = createBuffer(device, new Int32Array([width, height, N, 1, directions.length]), GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
-
-  // Init pass: fill nearest/label/dist from mask (seeds initialize themselves; others inf)
-  const initBind = createBindGroupWithBindings(device, initPipeline, {
-    0: uniformInit,
-    1: maskBuf,
-    2: nearestA,
-    3: labelA,
-    4: distA,
+  // --- 4. BindGroups作成 ---
+  // Init
+  const bgInit = createBindGroupWithBindings(device, pipelines.init, {
+    0: paramsBuffer,
+    1: labelInputBuffer,
+    2: jfaBufferA // Init結果をAに書き込む
   });
 
-  const workgroupSize = 256; // threads per group
-  const dispatch = Math.ceil(N / workgroupSize);
-  runKernel(device, [initPipeline], [initBind], [[dispatch, 1, 1]]);
+  // Step BindGroups (Ping-Pong)
+  // A -> B
+  const bgStepAB = createBindGroupWithBindings(device, pipelines.step, {
+    0: paramsBuffer,
+    1: jfaBufferA, // Read
+    2: jfaBufferB  // Write
+  });
+  // B -> A
+  const bgStepBA = createBindGroupWithBindings(device, pipelines.step, {
+    0: paramsBuffer,
+    1: jfaBufferB, // Read
+    2: jfaBufferA  // Write
+  });
 
-  // Compute initial jump length: next power of two >= max(width,height)
+  // Finalize BindGroups
+  // 最終結果がAにある場合
+  const bgFinalA = createBindGroupWithBindings(device, pipelines.final, {
+    0: paramsBuffer,
+    1: jfaBufferA,       // Input Seed Map
+    2: nearestLabelBuffer,
+    3: distanceBuffer
+  });
+  // 最終結果がBにある場合
+  const bgFinalB = createBindGroupWithBindings(device, pipelines.final, {
+    0: paramsBuffer,
+    1: jfaBufferB,
+    2: nearestLabelBuffer,
+    3: distanceBuffer
+  });
+
+
+  // --- 5. 実行 ---
+  console.log("JFA: Initializing...");
+  runKernel(device, [pipelines.init], [bgInit], [workgroups]);
+
+  // JFA Loop
+  // ステップサイズ: N/2, N/4, ..., 1
   const maxDim = Math.max(width, height);
-  let jump = 1;
-  while (jump < maxDim) jump <<= 1;
+  // 2の累乗に合わせる場合の開始ステップ数計算
+  // 例: 500px -> nextPoT=512 -> start=256
+  let stepSize = 1 << (Math.ceil(Math.log2(maxDim)) - 1);
+  // 画像サイズより大きいステップは不要なので調整
+  if (stepSize >= maxDim) stepSize /= 2;
 
-  // Ping-pong state
-  let curNearest = nearestA, curLabel = labelA, curDist = distA;
-  let nextNearest = nearestB, nextLabel = labelB, nextDist = distB;
+  let currentBufferIsA = true; // 現在の有効なデータが入っているバッファ
 
-  while (jump >= 1) {
-    // Update uniform: width,height,N,jump,dirLen
-    const u = new Int32Array([width, height, N, jump, directions.length]);
-    device.queue.writeBuffer(stepUniform, 0, u.buffer, u.byteOffset, u.byteLength);
+  console.log(`JFA: Starting loop (max_step=${stepSize})...`);
 
-    // Bind group for this iteration (read from cur*, write to next*)
-    const stepBind = createBindGroupWithBindings(device, stepPipeline, {
-      0: stepUniform,
-      1: curNearest,
-      3: curDist,
-      4: nextNearest,
-      6: dirBuf,
-      7: nextDist,
-      // directions at binding 6 via dirBind handled by separate bind group below
-    });
+  while (stepSize >= 1) {
+    // Uniform更新 (Step Size)
+    device.queue.writeBuffer(paramsBuffer, 8, new Float32Array([stepSize])); // offset 8 bytes (3rd float)
 
-    // Dispatch: we need two bind groups; some runtimes require single bind group set per slot.
-    // Use runKernel with both bind groups in order (pipeline is same).
-    runKernel(device, [stepPipeline], [stepBind], [[dispatch, 1, 1]]);
+    if (currentBufferIsA) {
+      runKernel(device, [pipelines.step], [bgStepAB], [workgroups]);
+    } else {
+      runKernel(device, [pipelines.step], [bgStepBA], [workgroups]);
+    }
 
-    // Swap ping-pong buffers
-    [curNearest, nextNearest] = [nextNearest, curNearest];
-    [curLabel, nextLabel] = [nextLabel, curLabel];
-    [curDist, nextDist] = [nextDist, curDist];
-
-    // Halve jump
-    jump >>= 1;
+    // Swap and Halve
+    currentBufferIsA = !currentBufferIsA;
+    stepSize /= 2;
   }
 
-  // Read back results
-  const nearestSeedIndex = await readBuffer(device, nextNearest, Int32Array, N);
-  const labelMap = await readBuffer(device, nextLabel, Int32Array, N);
-  const distanceMap = await readBuffer(device, nextDist, Int32Array, N);
+  // --- 6. 最終変換 (Seed Map -> Label & Distance) ---
+  console.log("JFA: Finalizing...");
+  const finalBg = currentBufferIsA ? bgFinalA : bgFinalB;
+  runKernel(device, [pipelines.final], [finalBg], [workgroups]);
 
-  return { nearestSeedIndex, labelMap, distanceMap };
+  // --- 7. 読み取り ---
+  const labelResult32 = await readBuffer(device, nearestLabelBuffer, Uint32Array, numPixels);
+  const distResult = await readBuffer(device, distanceBuffer, Int32Array, numPixels);
+
+  const labelResult8 = new Uint8Array(labelResult32);
+
+  return {
+    nearestLabelMap: labelResult8,
+    distanceMap: distResult
+  };
 }

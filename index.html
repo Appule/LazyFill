@@ -3,24 +3,114 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>GraphCut</title>
+  <title>LazyFill</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-  <h1>GraphCut</h1>
-  <input type="file" id="fileInput">
+  <div id="viewport">
+    <div id="canvasContainer" style="position: absolute; top: 0; left: 0; transform-origin: 0 0;">
+      <canvas id="canvasInput" style="display: block;"></canvas>
+      <canvas id="canvasMarker" style="position: absolute; top: 0; left: 0; cursor: crosshair;"></canvas>
+      <canvas id="canvasOutput"
+        style="position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none;"></canvas>
+    </div>
 
-  <button id="btnFg">前景</button> <!-- btnFg -->
-  <button id="btnBg">背景</button> <!-- btnBg -->
-  <button id="btnRun">実行</button> <!-- btnRun -->
-
-  <div style="position: relative;">
-    <canvas id="canvasInput"></canvas>
-    <canvas id="canvasMarker" style="position: absolute; left: 0; top: 0;"></canvas>
+    <div id="drop-message">
+      <div>📂 Drag & Drop Image Here</div>
+      <div style="font-size: 1rem; margin-top: 10px;">(or paste from clipboard)</div>
+    </div>
   </div>
 
-  <canvas id="canvasOutput"></canvas> <!-- 結果表示 -->
-  
+  <div id="panel-top" class="panel">
+    <h1>LazyFill</h1>
+
+    <button id="btnRun" class="btn-primary">▶ Run Graph Cut</button>
+    <button id="btnDownloadImg" class="btn-secondary" disabled>⇩ Image</button>
+    <button id="btnDownloadMask" class="btn-secondary" disabled>⇩ Mask</button>
+
+    <div style="width: 1px; height: 30px; background: #ddd; margin: 0 10px;"></div>
+
+    <button id="btnToggleParams" class="btn-secondary">⚙️ Params</button>
+  </div>
+
+  <div id="panel-params" class="panel hidden">
+    <h3>
+      Parameters
+      <button class="panel-toggle-btn"
+        onclick="document.getElementById('panel-params').classList.add('hidden')">×</button>
+    </h3>
+
+    <div class="row">
+      <span>BB Threshold</span>
+      <input type="number" id="inpBB" value="0.6" step="0.1">
+    </div>
+    <div class="row">
+      <span>Padding (px)</span>
+      <input type="number" id="inpPadding" value="1" step="1" min="0">
+    </div>
+    <div class="row">
+      <span>Sigma</span>
+      <input type="number" id="inpSigma" value="0.3" step="0.01">
+    </div>
+    <div class="row">
+      <span>Max Iter</span>
+      <input type="number" id="inpMaxIter" value="5000" step="100">
+    </div>
+    <div class="row">
+      <span>BFS Num</span>
+      <input type="number" id="inpBfsNum" value="10" step="1">
+    </div>
+    <div class="row">
+      <span>Strength</span>
+      <input type="number" id="inpStrength" value="0.95" step="0.05">
+    </div>
+  </div>
+
+  <div id="panel-tools" class="panel">
+    <h3>Tools & Palette</h3>
+
+    <label style="font-size: 1.1rem; padding: 5px 0; border-bottom: 1px solid #eee;">
+      <input type="checkbox" id="chkDynamic" checked>
+      <span>Dynamic Update</span>
+    </label>
+
+    <div style="margin: 15px 0;">
+      <div class="row">
+        <span>Brush Size: <strong id="dispBrushSize">2</strong>px</span>
+        <label style="margin:0; font-size:0.9rem;">
+          <input type="checkbox" id="chkHideMarker"> Hide
+        </label>
+      </div>
+      <input type="range" id="inpBrushSize" min="1" max="50" value="2">
+    </div>
+
+    <div class="color-row">
+      <input type="color" id="colorPicker" value="#0000ff">
+      <div style="display: flex; flex-direction: column; flex: 1;">
+        <span id="currentLabelName" style="font-weight: bold; font-size: 1.1rem;">Obj 2</span>
+        <div style="display: flex; align-items: center; gap: 5px; margin-top: 5px;">
+          <span style="font-size: 0.9rem;">Alpha:</span>
+          <input type="number" id="alphaInput" value="0.6" step="0.1" min="0.1" max="1.0" style="width: 60px;">
+        </div>
+      </div>
+    </div>
+
+    <div id="paletteContainer">
+    </div>
+
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+      <button id="btnAddLabel" class="btn-large-action" style="flex: 2;">+ Add</button>
+      <button id="btnDeleteLabel" class="btn-large-action" style="flex: 1;" disabled>- Del</button>
+    </div>
+    <button id="btnClearMarkers" class="btn-large-action" style="margin-top: 10px;">🗑 Clear All</button>
+
+    <div style="margin-top: 15px; color: #666; font-size: 0.9rem; text-align: center;">
+      Shift + Drag to Erase<br>
+      Middle Drag to Pan / Wheel to Zoom
+    </div>
+  </div>
+
   <script type="module">
     import { main } from "./main.js";
     main();

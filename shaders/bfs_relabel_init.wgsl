@@ -11,8 +11,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   // Sink starts at 0, others INF
   if (label[idx] == 1u) {
-      dist[idx] = 0u;
+    dist[idx] = 0u;
   } else {
-      dist[idx] = 1000000u;
+    dist[idx] = 1000000u;
   }
 }

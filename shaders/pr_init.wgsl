@@ -20,14 +20,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // Right
   var cr = 0.0;
   if (gid.x + 1u < w) {
-      let d = val + intensity[idx + 1u];
-      cr = exp(-d * inv_s) + 0.0001; 
+    let d = val + intensity[idx + 1u];
+    cr = exp(-(d) * inv_s) + 0.000001; 
   }
   // Down
   var cd = 0.0;
   if (gid.y + 1u < u32(params.height)) {
-      let d = val + intensity[idx + w];
-      cd = exp(-d * inv_s) + 0.0001;
+    let d = val + intensity[idx + w];
+    cd = exp(-(d) * inv_s) + 0.000001;
   }
   caps[idx * 2u] = cr;
   caps[idx * 2u + 1u] = cd;
@@ -39,9 +39,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // 3. Height Init
   let l = label[idx];
   if (l == 1u) { // Sink
-      h[idx] = 0u;
+    h[idx] = 0u;
   } else {
-      // Source & Unknown
-      h[idx] = u32(max(0, dist[idx]));
+    // Source & Unknown
+    h[idx] = u32(max(0, dist[idx]));
   }
 }

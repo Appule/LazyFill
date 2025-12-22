@@ -1,75 +1,63 @@
-// shaders/jfa_step.wgsl
-struct StepUniforms {
-  width  : i32,
-  height : i32,
-  N      : i32,
-  jump   : i32,
-  dirLen : i32,
-};
+struct Params { width: f32, height: f32, step: f32, pad: f32 }
+struct PixelData { sx: i32, sy: i32, label: u32, pad: u32 }
 
-@group(0) @binding(0) var<uniform> uStep : StepUniforms;
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> jfa_in: array<PixelData>;
+@group(0) @binding(2) var<storage, read_write> jfa_out: array<PixelData>;
 
-// Read (current state)
-@group(0) @binding(1) var<storage, read>       curNearest : array<i32>;
-@group(0) @binding(3) var<storage, read>       curDists   : array<i32>;
+fn get_idx(x: u32, y: u32, w: u32) -> u32 { return y * w + x; }
 
-// Write (next state)
-@group(0) @binding(4) var<storage, read_write> nextNearest : array<i32>;
-
-// directions
-@group(0) @binding(6) var<storage, read> directions : array<i32>; // packed as [dx,dy, dx,dy, ...]
-
-// next distance
-@group(0) @binding(7) var<storage, read_write> nextDists   : array<i32>;
-
-fn clampi(v:i32, minv:i32, maxv:i32) -> i32 {
-  return max(minv, min(v, maxv));
+fn manhattan(x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
+  return abs(x1 - x2) + abs(y1 - y2);
 }
 
-fn idxToXY(i:i32, width:i32) -> vec2<i32> {
-  let x = i % width;
-  let y = i / width;
-  return vec2<i32>(x, y);
-}
-
-fn manhattan(i:i32, seedIdx:i32, width:i32) -> i32 {
-  if (seedIdx < 0) { return 100000; }
-  let xy  = idxToXY(i, width);
-  let sxy = idxToXY(seedIdx, width);
-  let dx = abs(xy.x - sxy.x);
-  let dy = abs(xy.y - sxy.y);
-  return dx + dy;
-}
-
-@compute @workgroup_size(256)
+@compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let i : i32 = i32(gid.x);
-  if (i >= uStep.N) { return; }
+  let w = u32(params.width);
+  let h = u32(params.height);
+  if (gid.x >= w || gid.y >= h) { return; }
 
-  // Start with current best
-  var bestSeed  : i32 = curNearest[i];
-  var bestDist  : i32 = curDists[i];
+  let idx = get_idx(gid.x, gid.y, w);
+  let k = i32(params.step); // Step size
+  let my_x = i32(gid.x);
+  let my_y = i32(gid.y);
 
-  let xy = idxToXY(i, uStep.width);
+  // 現在のベスト (初期値)
+  var best_seed = jfa_in[idx];
+  var best_dist = 2000000000; // INF
 
-  for (var k:i32 = 0; k < uStep.dirLen; k = k + 1) {
-    let dx = directions[2*k]   * uStep.jump;
-    let dy = directions[2*k+1] * uStep.jump;
-    let nx = clampi(xy.x + dx, 0, uStep.width - 1);
-    let ny = clampi(xy.y + dy, 0, uStep.height - 1);
-    let nIdx = ny * uStep.width + nx;
+  // 初期シードまでの距離計算
+  // seed.sx が無効値(-10000)なら距離は非常に大きくなる
+  best_dist = manhattan(my_x, my_y, best_seed.sx, best_seed.sy);
 
-    let candSeed = curNearest[nIdx];
-    if (candSeed == 0 || candSeed == 2) { continue; }
-    let candDist  = manhattan(i, candSeed, uStep.width);
+  // 8近傍チェック (+0も含むので9回ループで記述)
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      if (dx == 0 && dy == 0) { continue; }
 
-    if (candDist < bestDist) {
-      bestDist  = candDist;
-      bestSeed  = candSeed;
+      let nx = my_x + dx * k;
+      let ny = my_y + dy * k;
+
+      // 範囲チェック
+      if (nx >= 0 && ny >= 0 && nx < i32(w) && ny < i32(h)) {
+        let n_idx = get_idx(u32(nx), u32(ny), w);
+        let n_data = jfa_in[n_idx];
+
+        // 有効なシードを持っているか？
+        // (ラベル0以外、または座標が無効でないか)
+        if (n_data.label != 0u) {
+          let d = manhattan(my_x, my_y, n_data.sx, n_data.sy);
+          
+          // より近い、または距離が同じでもラベルID等で優先度を決めて更新（ちらつき防止）
+          // ここでは単純に距離のみ
+          if (d < best_dist) {
+            best_dist = d;
+            best_seed = n_data;
+          }
+        }
+      }
     }
   }
 
-  // Commit to next buffers
-  nextNearest[i] = bestSeed;
-  nextDists[i]   = bestDist;
+  jfa_out[idx] = best_seed;
 }

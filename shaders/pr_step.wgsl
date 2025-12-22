@@ -42,71 +42,71 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   // Right
   if (gid.x + 1u < w) {
-      let n_idx = idx + 1u;
-      let cap = caps[idx * 2u];
-      let f = flow[idx * 2u];
-      let res = cap - f;
-      if (res > 0.00001) {
-          min_h = min(min_h, h[n_idx]);
-          if (my_h == h[n_idx] + 1u) {
-              let push = min(exc, res);
-              flow[idx * 2u] += push; // Write Own Edge
-              exc -= push;
-              if (exc <= 0.00001) { return; }
-          }
+    let n_idx = idx + 1u;
+    let cap = caps[idx * 2u];
+    let f = flow[idx * 2u];
+    let res = cap - f;
+    if (res > 0.00001) {
+      min_h = min(min_h, h[n_idx]);
+      if (my_h == h[n_idx] + 1u) {
+        let push = min(exc, res);
+        flow[idx * 2u] += push; // Write Own Edge
+        exc -= push;
+        if (exc <= 0.00001) { return; }
       }
+    }
   }
   // Down
   if (gid.y + 1u < h_dim) {
-      let n_idx = idx + w;
-      let cap = caps[idx * 2u + 1u];
-      let f = flow[idx * 2u + 1u];
-      let res = cap - f;
-      if (res > 0.00001) {
-          min_h = min(min_h, h[n_idx]);
-          if (my_h == h[n_idx] + 1u) {
-              let push = min(exc, res);
-              flow[idx * 2u + 1u] += push; // Write Own Edge
-              exc -= push;
-              if (exc <= 0.00001) { return; }
-          }
+    let n_idx = idx + w;
+    let cap = caps[idx * 2u + 1u];
+    let f = flow[idx * 2u + 1u];
+    let res = cap - f;
+    if (res > 0.00001) {
+      min_h = min(min_h, h[n_idx]);
+      if (my_h == h[n_idx] + 1u) {
+        let push = min(exc, res);
+        flow[idx * 2u + 1u] += push; // Write Own Edge
+        exc -= push;
+        if (exc <= 0.00001) { return; }
       }
+    }
   }
   // Left (Neighbor: idx-1)
   if (gid.x > 0u) {
-      let n_idx = idx - 1u;
-      let cap = caps[n_idx * 2u];
-      let f = flow[n_idx * 2u];
-      let res = cap + f; // Push back
-      if (res > 0.00001) {
-          min_h = min(min_h, h[n_idx]);
-          if (my_h == h[n_idx] + 1u) {
-              let push = min(exc, res);
-              flow[n_idx * 2u] -= push; // Write Neighbor Edge (Safe due to parity)
-              exc -= push;
-              if (exc <= 0.00001) { return; }
-          }
+    let n_idx = idx - 1u;
+    let cap = caps[n_idx * 2u];
+    let f = flow[n_idx * 2u];
+    let res = cap + f; // Push back
+    if (res > 0.00001) {
+      min_h = min(min_h, h[n_idx]);
+      if (my_h == h[n_idx] + 1u) {
+        let push = min(exc, res);
+        flow[n_idx * 2u] -= push; // Write Neighbor Edge (Safe due to parity)
+        exc -= push;
+        if (exc <= 0.00001) { return; }
       }
+    }
   }
   // Up (Neighbor: idx-w)
   if (gid.y > 0u) {
-      let n_idx = idx - w;
-      let cap = caps[n_idx * 2u + 1u];
-      let f = flow[n_idx * 2u + 1u];
-      let res = cap + f;
-      if (res > 0.00001) {
-          min_h = min(min_h, h[n_idx]);
-          if (my_h == h[n_idx] + 1u) {
-              let push = min(exc, res);
-              flow[n_idx * 2u + 1u] -= push; // Write Neighbor Edge
-              exc -= push;
-              if (exc <= 0.00001) { return; }
-          }
+    let n_idx = idx - w;
+    let cap = caps[n_idx * 2u + 1u];
+    let f = flow[n_idx * 2u + 1u];
+    let res = cap + f;
+    if (res > 0.00001) {
+      min_h = min(min_h, h[n_idx]);
+      if (my_h == h[n_idx] + 1u) {
+        let push = min(exc, res);
+        flow[n_idx * 2u + 1u] -= push; // Write Neighbor Edge
+        exc -= push;
+        if (exc <= 0.00001) { return; }
       }
+    }
   }
 
   // Relabel
   if (min_h >= my_h && min_h < V_MAX) {
-      h[idx] = min_h + 1u;
+    h[idx] = min_h + 1u;
   }
 }

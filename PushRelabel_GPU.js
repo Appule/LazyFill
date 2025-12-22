@@ -2,9 +2,10 @@ import { initWebGPU, createBuffer, loadWGSL, createPipeline, runKernel, readBuff
 
 export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityData, labelMapData, distanceMapData, options = {}) {
   const { device } = await initWebGPU();
-
-  const strength = options.strength || 0.8;
-  const sigma = options.sigma || 0.1;
+  const maxIter = options.maxIter || 5000;
+  const bfsFreq = options.bfsFreq || 500;
+  const strength = options.strength || 0.95;
+  const sigma = options.sigma || 0.3;
 
   // --- WGSL Load ---
   const initCode = await loadWGSL('./shaders/pr_init.wgsl');
@@ -70,17 +71,12 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
   console.log("Initializing...");
   runKernel(device, [pipelines.init], [bgInit], [workgroups]);
 
-  const MAX_ITER = 3000;
-  const BFS_FREQ = 1000; // 1000回ごとにGlobal Relabeling
   const BFS_DIAMETER = Math.max(imageWidth, imageHeight);
-
-  console.log(`Starting Loop (Strength=${strength})...`);
-
-  for (let i = 0; i < MAX_ITER; i++) {
+  for (let i = 0; i < maxIter; i++) {
 
     // --- Periodic BFS (Global Relabeling) ---
     // 高さが不正確になると収束が遅くなるため、定期的に正確な距離にリセットする
-    if (i > 0 && i % BFS_FREQ === 0) {
+    if (i > 0 && i % bfsFreq === 0) {
       // 1. Init: Sink=0, Others=INF
       runKernel(device, [pipelines.bfsRelabelInit], [bgBfsRelabelInit], [workgroups]);
 
