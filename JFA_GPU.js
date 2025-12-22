@@ -52,8 +52,8 @@ export async function runJumpFloodingWebGPU(width, height, mask) {
   const labelA = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
   const labelB = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
 
-  const distA = createBuffer(device, new Float32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
-  const distB = createBuffer(device, new Float32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
+  const distA = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
+  const distB = createBuffer(device, new Int32Array(N), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
 
   // For step kernel uniforms: width,height,N, jump, directionsLen
   const stepUniform = createBuffer(device, new Int32Array([width, height, N, 1, directions.length]), GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
@@ -89,10 +89,8 @@ export async function runJumpFloodingWebGPU(width, height, mask) {
     const stepBind = createBindGroupWithBindings(device, stepPipeline, {
       0: stepUniform,
       1: curNearest,
-      2: curLabel,
       3: curDist,
       4: nextNearest,
-      5: nextLabel,
       6: dirBuf,
       7: nextDist,
       // directions at binding 6 via dirBind handled by separate bind group below
@@ -112,9 +110,9 @@ export async function runJumpFloodingWebGPU(width, height, mask) {
   }
 
   // Read back results
-  const nearestSeedIndex = await readBuffer(device, curNearest, Int32Array, N);
-  const labelMap = await readBuffer(device, curLabel, Int32Array, N);
-  const distanceMap = await readBuffer(device, curDist, Float32Array, N);
+  const nearestSeedIndex = await readBuffer(device, nextNearest, Int32Array, N);
+  const labelMap = await readBuffer(device, nextLabel, Int32Array, N);
+  const distanceMap = await readBuffer(device, nextDist, Int32Array, N);
 
   return { nearestSeedIndex, labelMap, distanceMap };
 }

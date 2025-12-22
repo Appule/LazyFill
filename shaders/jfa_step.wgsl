@@ -11,18 +11,16 @@ struct StepUniforms {
 
 // Read (current state)
 @group(0) @binding(1) var<storage, read>       curNearest : array<i32>;
-@group(0) @binding(2) var<storage, read>       curLabels  : array<i32>;
-@group(0) @binding(3) var<storage, read>       curDists   : array<f32>;
+@group(0) @binding(3) var<storage, read>       curDists   : array<i32>;
 
 // Write (next state)
 @group(0) @binding(4) var<storage, read_write> nextNearest : array<i32>;
-@group(0) @binding(5) var<storage, read_write> nextLabels  : array<i32>;
 
 // directions
 @group(0) @binding(6) var<storage, read> directions : array<i32>; // packed as [dx,dy, dx,dy, ...]
 
 // next distance
-@group(0) @binding(7) var<storage, read_write> nextDists   : array<f32>;
+@group(0) @binding(7) var<storage, read_write> nextDists   : array<i32>;
 
 fn clampi(v:i32, minv:i32, maxv:i32) -> i32 {
   return max(minv, min(v, maxv));
@@ -34,20 +32,13 @@ fn idxToXY(i:i32, width:i32) -> vec2<i32> {
   return vec2<i32>(x, y);
 }
 
-fn manhattan(i:i32, seedIdx:i32, width:i32) -> f32 {
-  if (seedIdx < 0) { return 1e30; }
+fn manhattan(i:i32, seedIdx:i32, width:i32) -> i32 {
+  if (seedIdx < 0) { return 100000; }
   let xy  = idxToXY(i, width);
   let sxy = idxToXY(seedIdx, width);
   let dx = abs(xy.x - sxy.x);
   let dy = abs(xy.y - sxy.y);
-  return f32(dx + dy);
-}
-
-fn tieBreak(currLabel:i32, currSeed:i32, candLabel:i32, candSeed:i32) -> bool {
-  if (candLabel < currLabel) { return true; }
-  if (candLabel > currLabel) { return false; }
-  // same label
-  return candSeed < currSeed;
+  return dx + dy;
 }
 
 @compute @workgroup_size(256)
@@ -57,8 +48,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   // Start with current best
   var bestSeed  : i32 = curNearest[i];
-  var bestLabel : i32 = curLabels[i];
-  var bestDist  : f32 = curDists[i];
+  var bestDist  : i32 = curDists[i];
 
   let xy = idxToXY(i, uStep.width);
 
@@ -70,25 +60,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let nIdx = ny * uStep.width + nx;
 
     let candSeed = curNearest[nIdx];
-    if (candSeed < 0) { continue; }
-    let candLabel = curLabels[candSeed];  // label of that seed
+    if (candSeed == 0 || candSeed == 2) { continue; }
     let candDist  = manhattan(i, candSeed, uStep.width);
 
     if (candDist < bestDist) {
       bestDist  = candDist;
       bestSeed  = candSeed;
-      bestLabel = candLabel;
-    } else if (candDist == bestDist && candSeed != bestSeed) {
-      if (tieBreak(bestLabel, bestSeed, candLabel, candSeed)) {
-        bestDist  = candDist;
-        bestSeed  = candSeed;
-        bestLabel = candLabel;
-      }
     }
   }
 
   // Commit to next buffers
   nextNearest[i] = bestSeed;
-  nextLabels[i]  = bestLabel;
   nextDists[i]   = bestDist;
 }

@@ -1,0 +1,6 @@
+エッジベースの余剰フロー・残余容量管理
+ノードチェッカーボード処理による、Atomicに依存しない並列処理
+定期的なBFSによる収束速度の向上
+収束判定は、残余容量ネットワーク上でBFSを実行し、ソース-シンク間の経路が見つからなかった場合（もしくは、反復回数が上限に達した場合）
+出力はsegmentationとheightsで、segmentationはheightsが画像の2*(width+height)以上である場所を前景マスクとする。heightsは、Math.max(width, heights)で正規化した高さを出力。
+t-linksを用いたマーカー強度の調整

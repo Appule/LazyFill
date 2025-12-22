@@ -1,9 +1,8 @@
-import { getImageDataFromFileInput, drawFlatArrayToCanvas } from './fileIO.js';
+import { getImageDataFromFileInput, drawFlatArrayToCanvas, drawFloatArrayToCanvas } from './fileIO.js';
 import { extractNormalizedR, drawCirclesOnCanvas } from './flatDataUtils.js';
 import { imageProc } from './wgpuProc.js';
-import { runJumpFlooding } from './JFA.js';
-import { graphCutScalar } from './PushRelabel.js';
 import { runJumpFloodingWebGPU } from './JFA_GPU.js';
+import { runPushRelabelWebGPU } from './PushRelabel_GPU.js';
 
 
 export async function main() {
@@ -55,40 +54,28 @@ export async function main() {
     // markerキャンバスから前景／背景ヒントを反映
     let markerData = ctxMarker.getImageData(0, 0, canvasMarker.width, canvasMarker.height).data;
     const mask = new Int32Array(width * height).fill(-1);
-    const sourceSeeds = [];
-    const sinkSeeds = [];
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let idx = y * width + x;
         let r = markerData[idx * 4], g = markerData[idx * 4 + 1];
         if (g > 200) {
           mask[idx] = 2; // 緑 → 前景
-          sourceSeeds.push({ x, y });
         }
         else if (r > 200) {
           mask[idx] = 1; // 赤 → 背景
-          sinkSeeds.push({ x, y });
         }
-        else mask[idx] = -1; // その他 → 無視
+        else mask[idx] = 0; // その他 → 無視
       }
     }
 
-    // mask[0] = 2; // 緑 → 前景
-    // sourceSeeds.push({ x: 0, y: 0 });
-
-    // mask[width - 1] = 1; // 赤 → 背景
-    // sinkSeeds.push({ x: width - 1, y: 0 });
-
     const { nearestSeedIndex, labelMap, distanceMap } = await runJumpFloodingWebGPU(width, height, mask);
-    // const { nearestSeedIndex, labelMap, distanceMap } = await runJumpFlooding(width, height, mask);
+
+    const { segmentation, heights } = await runPushRelabelWebGPU(
+      width, height, normalizedR,
+      labelMap, distanceMap,
+      { strength: 0.8, sigma: 0.1 }
+    );
     
-    const resultMask = graphCutScalar({
-      width, height, image: normalizedR,
-      nearestSeedIndex, labelMap, distanceMap,
-      sigma: 0.1, sourceSeeds, sinkSeeds, bias: 0.01
-    });
-    drawCirclesOnCanvas(canvasOutput, resultMask.mask, width, height);
-    // console output resultMask sum (mask[i] == 1)
-    console.log(resultMask.mask.reduce((a, b) => a + b, 0) / 255);
+    drawFloatArrayToCanvas(canvasOutput, segmentation, width, height);
   }
 }

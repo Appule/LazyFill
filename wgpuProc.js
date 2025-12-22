@@ -32,12 +32,12 @@ export async function imageProc(rgbaFlat, width, height) {
   view.setFloat32(12, 1.0, true);      // LoG scale
   const paramsBuffer = createBuffer(device, paramsData, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
-  const wgslHeader = await loadWGSL('shaders/header.wgsl');
-  const wgslCodeGray = await loadWGSL('shaders/rgbaToGray_f32.wgsl');
-  const wgslCodeGau = await loadWGSL('shaders/gaussian_f32.wgsl');
-  const wgslCodeLap = await loadWGSL('shaders/laplacian_f32.wgsl');
-  const wgslCodeInt = await loadWGSL('shaders/intensity_f32.wgsl');
-  const wgslCodePack = await loadWGSL('shaders/f32ToPacked_u32.wgsl');
+  const wgslHeader = await loadWGSL('shaders/imageProc/header.wgsl');
+  const wgslCodeGray = await loadWGSL('shaders/imageProc/rgbaToGray_f32.wgsl');
+  const wgslCodeGau = await loadWGSL('shaders/imageProc/gaussian_f32.wgsl');
+  const wgslCodeLap = await loadWGSL('shaders/imageProc/laplacian_f32.wgsl');
+  const wgslCodeInt = await loadWGSL('shaders/imageProc/intensity_f32.wgsl');
+  const wgslCodePack = await loadWGSL('shaders/imageProc/f32ToPacked_u32.wgsl');
   const pipelines = [
     createPipeline(device, wgslHeader + wgslCodeGray, 'main'),
     createPipeline(device, wgslHeader + wgslCodeGau, 'main'),
