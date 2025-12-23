@@ -784,12 +784,12 @@ export async function main() {
               data[i * 4 + 0] = 0;
               data[i * 4 + 1] = 0;
               data[i * 4 + 2] = 0;
-              data[i * 4 + 3] = 0;
+              data[i * 4 + 3] = 255 - luminance;
             } else {
               // 白背景
-              data[i * 4 + 0] = 255;
-              data[i * 4 + 1] = 255;
-              data[i * 4 + 2] = 255;
+              data[i * 4 + 0] = luminance;
+              data[i * 4 + 1] = luminance;
+              data[i * 4 + 2] = luminance;
               data[i * 4 + 3] = 255;
             }
           }
