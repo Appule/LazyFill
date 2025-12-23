@@ -276,3 +276,56 @@ label {
   border: 1px solid #888;
   border-radius: 2px;
 }
+
+/* --- Brush Guide --- */
+#brushGuide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  /* マウスイベントを透過 */
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  /* 視認性向上のための影 */
+  border-radius: 50%;
+  z-index: 100;
+  display: none;
+  /* 初期状態は非表示 */
+  transform: translate(-50%, -50%);
+  /* 中心基準 */
+}
+
+/* --- Tool Buttons --- */
+.tool-group {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 10px;
+  background: #eee;
+  padding: 5px;
+  border-radius: 4px;
+}
+
+.tool-btn-label {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  user-select: none;
+  transition: background 0.2s, color 0.2s;
+  color: #555;
+}
+
+/* ラジオボタン本体は隠す */
+.tool-btn-label input {
+  display: none;
+}
+
+/* 選択時のスタイル */
+.tool-btn-label:has(input:checked) {
+  background: #fff;
+  color: var(--color-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}

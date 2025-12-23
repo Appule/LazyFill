@@ -9,6 +9,7 @@
 
 <body>
   <div id="viewport">
+    <div id="brushGuide"></div>
     <div id="canvasContainer" style="position: absolute; top: 0; left: 0; transform-origin: 0 0;">
       <canvas id="canvasInput" style="display: block;"></canvas>
       <canvas id="canvasMarker" style="position: absolute; top: 0; left: 0; cursor: crosshair;"></canvas>
@@ -98,6 +99,18 @@
       </label>
     </div>
 
+    <div class="tool-group">
+      <label class="tool-btn-label">
+        <input type="radio" name="toolMode" value="brush" checked> 🖌 ブラシ
+      </label>
+      <label class="tool-btn-label">
+        <input type="radio" name="toolMode" value="eraser"> 🧹 消しゴム
+      </label>
+      <label class="tool-btn-label">
+        <input type="radio" name="toolMode" value="move"> ✋ デフォルト
+      </label>
+    </div>
+
     <div style="margin: 0 0 15px 0;">
       <div class="row">
         <span>ブラシサイズ: <strong id="dispBrushSize">2</strong>px</span>
@@ -124,11 +137,6 @@
       <button id="btnDeleteLabel" class="btn-large-action" style="flex: 1;" disabled>- 削除</button>
     </div>
     <button id="btnClearMarkers" class="btn-large-action" style="margin-top: 10px;">🗑 マーカーをクリア</button>
-
-    <div style="margin-top: 15px; color: #666; font-size: 0.9rem; text-align: center;">
-      Shiftドラッグ：消しゴム<br>
-      ホイールドラッグ：カメラ移動
-    </div>
   </div>
 
   <script type="module">

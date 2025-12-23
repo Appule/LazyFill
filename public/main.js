@@ -21,7 +21,9 @@ class AppState {
       2: { r: 255, g: 0, b: 0, a: 0.6, hex: '#ff0000' }     // Default Object
     };
     this.labelPixelCounts = {};
+    this.isMarkerDirty = false;
 
+    this.toolMode = 'brush';
     this.currentLabelId = 2;
     this.brushSize = 2;
     this.isImageLoaded = false;
@@ -33,6 +35,7 @@ class AppState {
     this.inputData = inputData;
     this.markerBuffer = new Int32Array(width * height).fill(0);
     this.latestSegmentation = null;
+    this.isMarkerDirty = false;
     this.isImageLoaded = true;
     this.labelPixelCounts = {};
     Object.keys(this.labels).forEach(k => this.labelPixelCounts[k] = 0);
@@ -140,6 +143,8 @@ class AppView {
       },
 
       // Tools & Palette
+      brushGuide: document.getElementById('brushGuide'),
+      toolRadios: document.querySelectorAll('input[name="toolMode"]'),
       dispBrush: document.getElementById('dispBrushSize'),
       chkShowMarker: document.getElementById('chkShowMarker'),
       palette: document.getElementById('paletteContainer'),
@@ -221,6 +226,29 @@ class AppView {
     });
 
     // --- Tools & Palette Actions ---
+    // --- Tool Switching ---
+    this.els.toolRadios.forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          this.state.toolMode = e.target.value;
+          this.updateCursor(); // カーソル形状更新
+          this.updateBrushGuideVisibility(); // Moveモードならガイド消すなど
+        }
+      });
+    });
+
+    // --- Marker Visibility & Auto Run Logic ---
+    this.els.chkShowMarker.addEventListener('change', (e) => {
+      const isVisible = e.target.checked;
+      this.updateLayerVisibility();
+
+      // 変更があった場合(isMarkerDirty)のみ実行する
+      if (!isVisible && this.getParameters().isDynamic && this.state.isMarkerDirty) {
+        this.handlers.onRun();
+      }
+    });
+
+    // --- Buttons ---
     this.els.btnAddLabel.addEventListener('click', () => this.handlers.onAddLabel());
     this.els.btnDeleteLabel.addEventListener('click', () => this.handlers.onDeleteLabel());
 
@@ -254,25 +282,44 @@ class AppView {
     vp.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.handleZoom(e);
+      this.updateBrushGuide(e.clientX, e.clientY);
     }, { passive: false });
 
     // Mouse Events
     vp.addEventListener('mousedown', (e) => {
-      // Prevent default drag behavior
       e.preventDefault();
 
-      if (e.button === 1) { // Middle
+      // マウスボタン判定
+      const isLeft = (e.button === 0);
+      const isMiddle = (e.button === 1);
+      const isRight = (e.button === 2);
+
+      const mode = this.state.toolMode;
+
+      // ■ パン(移動)開始条件:
+      // 1. ミドルドラッグ or 右ドラッグ (全モード共通)
+      // 2. 左ドラッグ (Moveモード時のみ)
+      if (isMiddle || isRight || (isLeft && mode === 'move')) {
         this.isPanning = true;
         this.lastMousePos = { x: e.clientX, y: e.clientY };
-        vp.style.cursor = 'grab';
-      } else if (e.button === 0) { // Left
+        vp.style.cursor = 'grabbing';
+        return;
+      }
+
+      // ■ 描画開始条件:
+      // 左ドラッグ AND (Brush or Eraser)
+      if (isLeft && (mode === 'brush' || mode === 'eraser')) {
         this.drawing = true;
+        // Eraserモードなら消しゴム(labelId=0)として振る舞う
+        const isEraser = (mode === 'eraser');
+
         const pos = this.getCanvasCoordinates(e);
-        if (pos) this.handlers.onDraw(pos.x, pos.y, e.shiftKey);
+        if (pos) this.handlers.onDraw(pos.x, pos.y, isEraser);
       }
     });
 
     window.addEventListener('mousemove', (e) => {
+      // 1. パン処理
       if (this.isPanning) {
         const dx = e.clientX - this.lastMousePos.x;
         const dy = e.clientY - this.lastMousePos.y;
@@ -280,23 +327,99 @@ class AppView {
         this.transform.y += dy;
         this.lastMousePos = { x: e.clientX, y: e.clientY };
         this.updateTransform();
-      } else if (this.drawing) {
-        const pos = this.getCanvasCoordinates(e);
-        if (pos) this.handlers.onDraw(pos.x, pos.y, e.shiftKey);
+
+        // パン中もガイド位置更新
+        this.updateBrushGuide(e.clientX, e.clientY);
+        return;
       }
+
+      // 2. 描画処理
+      if (this.drawing) {
+        const isEraser = (this.state.toolMode === 'eraser');
+        const pos = this.getCanvasCoordinates(e);
+        if (pos) this.handlers.onDraw(pos.x, pos.y, isEraser);
+      }
+
+      // 3. ブラシガイドの更新 (マウス移動時常時)
+      this.updateBrushGuide(e.clientX, e.clientY);
     });
 
     window.addEventListener('mouseup', (e) => {
-      if (this.isPanning && e.button === 1) {
+      // パン終了
+      if (this.isPanning) {
+        // 解除条件を緩くする(どのボタンが上がっても解除でOK)
         this.isPanning = false;
-        vp.style.cursor = 'default';
-      } else if (this.drawing && e.button === 0) {
+        this.updateCursor(); // カーソルをツール標準に戻す
+      }
+      // 描画終了
+      else if (this.drawing && e.button === 0) {
         this.drawing = false;
         this.handlers.onDrawEnd();
       }
     });
 
     vp.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  setToolMode(mode) {
+    // 1. Stateを更新
+    this.state.toolMode = mode;
+
+    // 2. UI (ラジオボタン) の見た目を更新
+    const radio = Array.from(this.els.toolRadios).find(r => r.value === mode);
+    if (radio) {
+      radio.checked = true;
+    }
+
+    // 3. カーソルとガイドの表示状態を更新
+    this.updateCursor();
+    this.updateBrushGuideVisibility();
+  }
+
+  // --- Cursor & Guide Helpers ---
+
+  updateCursor() {
+    const vp = this.els.viewport;
+    const mode = this.state.toolMode;
+    if (mode === 'move') {
+      vp.style.cursor = 'grab';
+    } else {
+      // Brush/Eraserはガイドが出るのでカーソルは消すか十字にする
+      // ここでは十字(crosshair)か、'none'にしてガイドのみにする手が一般的
+      vp.style.cursor = 'crosshair';
+    }
+  }
+
+  updateBrushGuideVisibility() {
+    const mode = this.state.toolMode;
+    // Moveモードならガイド非表示
+    if (mode === 'move') {
+      this.els.brushGuide.style.display = 'none';
+    } else {
+      this.els.brushGuide.style.display = 'block';
+    }
+  }
+
+  updateBrushGuide(clientX, clientY) {
+    // 画像未ロード、またはMoveモードなら更新しない
+    if (!this.state.isImageLoaded || this.state.toolMode === 'move') {
+      this.els.brushGuide.style.display = 'none';
+      return;
+    }
+
+    this.els.brushGuide.style.display = 'block';
+
+    // ブラシ半径(px) * 2 * 表示倍率 = 画面上の直径
+    const diameter = (this.state.brushSize * 2) * this.transform.scale;
+
+    const guide = this.els.brushGuide;
+    guide.style.width = `${diameter}px`;
+    guide.style.height = `${diameter}px`;
+    guide.style.left = `${clientX}px`;
+    guide.style.top = `${clientY}px`;
+
+    // ※ index.htmlのCSSで transform: translate(-50%, -50%) が
+    // 指定されている前提なので、left/topはマウス中心でOK
   }
 
   // --- Transform Logic (FullScreen Aware) ---
@@ -706,9 +829,9 @@ export async function main() {
       img.src = URL.createObjectURL(file);
     },
 
-    onLabelSelect: (id) => { state.currentLabelId = id; view.updatePaletteUI(); },
+    onLabelSelect: (id) => { state.currentLabelId = id; view.updatePaletteUI(); view.setToolMode('brush'); },
     onAddLabel: () => { state.currentLabelId = state.addLabel(); view.updatePaletteUI(); },
-    onDeleteLabel: () => { state.removeLabel(state.currentLabelId); view.updatePaletteUI(); view.redrawMarkerCanvas(); },
+    onDeleteLabel: () => { state.removeLabel(state.currentLabelId); state.isMarkerDirty = true; view.updatePaletteUI(); view.redrawMarkerCanvas(); },
     onColorChange: (hex) => { 
       state.updateLabelColor(state.currentLabelId, hex); view.updatePaletteUI(); view.redrawMarkerCanvas();
       if (state.latestSegmentation) view.drawResult(state.latestSegmentation);
@@ -717,11 +840,11 @@ export async function main() {
       state.updateLabelColor(state.currentLabelId, undefined, alpha); view.redrawMarkerCanvas();
       if (state.latestSegmentation) view.drawResult(state.latestSegmentation);
     },
-    onClearMarkers: () => { state.markerBuffer.fill(0); state.labelPixelCounts = {}; view.redrawMarkerCanvas(); },
+    onClearMarkers: () => { state.markerBuffer.fill(0); state.isMarkerDirty = true; state.labelPixelCounts = {}; view.redrawMarkerCanvas(); },
 
-    onDraw: (cx, cy, shiftKey) => {
+    onDraw: (cx, cy, isEraser) => {
       const r = state.brushSize;
-      const labelId = shiftKey ? 0 : state.currentLabelId;
+      const labelId = isEraser ? 0 : state.currentLabelId;
 
       view.drawCircle(cx, cy, r, labelId);
 
@@ -737,12 +860,11 @@ export async function main() {
           if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r2) {
             const idx = y * width + x;
             const oldId = markerBuffer[idx];
-
-            // IDが変わる場合のみカウント更新
             if (oldId !== labelId) {
               state.updatePixelCount(oldId, -1);
               state.updatePixelCount(labelId, 1);
               markerBuffer[idx] = labelId;
+              state.isMarkerDirty = true;
             }
           }
         }
@@ -750,7 +872,10 @@ export async function main() {
     },
 
     onDrawEnd: () => {
-      if (view.getParameters().isDynamic) handlers.onRun();
+      const isMarkerVisible = view.els.chkShowMarker.checked;
+      if (!isMarkerVisible && view.getParameters().isDynamic && state.isMarkerDirty) {
+        handlers.onRun();
+      }
     },
 
     onRun: async () => {
@@ -759,6 +884,7 @@ export async function main() {
       if (resultMap) {
         view.drawResult(resultMap);
         view.updateDownloadButtons(true);
+        state.isMarkerDirty = false;
       }
     },
 
