@@ -119,8 +119,11 @@ class AppView {
       dropMessage: document.getElementById('drop-message'),
 
       // Top Bar
+      inpZoomLevel: document.getElementById('inpZoomLevel'),
       btnRun: document.getElementById('btnRun'),
+      chkDynamic: document.getElementById('chkDynamic'),
       btnDownloadImg: document.getElementById('btnDownloadImg'),
+      chkTransparent: document.getElementById('chkTransparent'),
       btnDownloadMask: document.getElementById('btnDownloadMask'),
       btnToggleParams: document.getElementById('btnToggleParams'),
       panelParams: document.getElementById('panel-params'),
@@ -137,9 +140,8 @@ class AppView {
       },
 
       // Tools & Palette
-      chkDynamic: document.getElementById('chkDynamic'),
       dispBrush: document.getElementById('dispBrushSize'),
-      chkHideMarker: document.getElementById('chkHideMarker'),
+      chkShowMarker: document.getElementById('chkShowMarker'),
       palette: document.getElementById('paletteContainer'),
       colorPicker: document.getElementById('colorPicker'),
       alphaInput: document.getElementById('alphaInput'),
@@ -203,6 +205,12 @@ class AppView {
     });
 
     // --- Top Bar Actions ---
+    this.els.inpZoomLevel.addEventListener('change', (e) => {
+      let percent = parseFloat(e.target.value);
+      if (isNaN(percent) || percent <= 0) percent = 100;
+      const newScale = percent / 100.0;
+      this.setZoomManual(newScale);
+    });
     this.els.btnRun.addEventListener('click', () => this.handlers.onRun());
     this.els.btnDownloadImg.addEventListener('click', () => this.handlers.onDownloadImage());
     this.els.btnDownloadMask.addEventListener('click', () => this.handlers.onDownloadMask());
@@ -235,12 +243,10 @@ class AppView {
       this.els.dispBrush.textContent = size;
     });
 
-    // Hide Markers
-    this.els.chkHideMarker.addEventListener('change', (e) => {
-      this.els.canvases.marker.style.opacity = e.target.checked ? '0' : '1'; // 1 because we handle alpha in canvas
-      if (!e.target.checked) this.redrawMarkerCanvas();
+    // Show Marker
+    this.els.chkShowMarker.addEventListener('change', () => {
+      this.updateLayerVisibility();
     });
-
 
     // --- Canvas Navigation & Drawing ---
 
@@ -307,16 +313,25 @@ class AppView {
 
   handleZoom(e) {
     if (!this.state.isImageLoaded) return;
-    const zoomSensitivity = 0.001;
-    const delta = -e.deltaY * zoomSensitivity;
-    let newScale = this.transform.scale + this.transform.scale * delta;
-    newScale = Math.max(0.1, Math.min(newScale, 20.0));
 
+    // ズーム係数
+    const ZOOM_FACTOR = 1.1;
+    const direction = e.deltaY > 0 ? -1 : 1;
+    const factor = direction > 0 ? ZOOM_FACTOR : (1 / ZOOM_FACTOR);
+
+    let newScale = this.transform.scale * factor;
+
+    // 制限 (1% ~ 10000%)
+    newScale = Math.max(0.01, Math.min(newScale, 100.0));
+
+    // マウス中心ズーム計算
     const rectViewport = this.els.viewport.getBoundingClientRect();
     const vpMouseX = e.clientX - rectViewport.left;
     const vpMouseY = e.clientY - rectViewport.top;
     const oldX = this.transform.x;
     const oldY = this.transform.y;
+
+    // 実際の倍率比 (クランプされたnewScaleを使うため再計算)
     const scaleRatio = newScale / this.transform.scale;
 
     this.transform.x = vpMouseX - (vpMouseX - oldX) * scaleRatio;
@@ -325,23 +340,59 @@ class AppView {
 
     this.updateTransform();
   }
+  
+  setZoomManual(newScale) {
+    if (!this.state.isImageLoaded) return;
+
+    // 制限
+    newScale = Math.max(0.01, Math.min(newScale, 100.0));
+
+    const oldScale = this.transform.scale;
+    const scaleRatio = newScale / oldScale;
+
+    // ビューポートの中心を基準にズーム
+    const vpW = this.els.viewport.clientWidth;
+    const vpH = this.els.viewport.clientHeight;
+    const centerX = vpW / 2;
+    const centerY = vpH / 2;
+
+    const oldX = this.transform.x;
+    const oldY = this.transform.y;
+
+    this.transform.x = centerX - (centerX - oldX) * scaleRatio;
+    this.transform.y = centerY - (centerY - oldY) * scaleRatio;
+    this.transform.scale = newScale;
+
+    this.updateTransform();
+  }
 
   updateTransform() {
     const { x, y, scale } = this.transform;
     this.els.canvasContainer.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+
+    // 入力欄の表示を同期
+    if (document.activeElement !== this.els.inpZoomLevel) {
+      this.els.inpZoomLevel.value = Math.round(scale * 100);
+    }
   }
 
   resetView(imgW, imgH) {
     const vpW = this.els.viewport.clientWidth;
     const vpH = this.els.viewport.clientHeight;
+
+    // 画面に収まるスケール (90%)
     const scale = Math.min(vpW / imgW, vpH / imgH) * 0.9;
+
     const x = (vpW - imgW * scale) / 2;
     const y = (vpH - imgH * scale) / 2;
+
     this.transform = { scale, x, y };
     this.updateTransform();
 
-    // Remove drop message once image is loaded
     this.els.dropMessage.style.display = 'none';
+
+    // 初期値をinputにも反映
+    this.els.inpZoomLevel.value = Math.round(scale * 100);
   }
 
   resizeCanvases(w, h) {
@@ -376,7 +427,6 @@ class AppView {
   }
 
   drawCircle(cx, cy, r, labelId) {
-    if (this.els.chkHideMarker.checked) return;
     const c = this.state.getColor(labelId);
     const ctx = this.els.ctx.marker;
     ctx.save();
@@ -391,6 +441,27 @@ class AppView {
       ctx.fill();
     }
     ctx.restore();
+  }
+
+  updateLayerVisibility() {
+    const isMarkerVisible = this.els.chkShowMarker.checked;
+
+    // 1. マーカーキャンバスの制御
+    // CSS opacityで制御 (1:見える, 0:見えない)
+    this.els.canvases.marker.style.opacity = isMarkerVisible ? '1' : '0';
+
+    // 2. マスク(Output)キャンバスの制御
+    // マーカーが表示されているなら、マスクは隠す
+    // マーカーが隠されているなら、マスクを表示する(ただし結果がある場合のみ)
+    if (isMarkerVisible) {
+      this.els.canvases.output.style.visibility = 'hidden';
+    } else {
+      // 結果データが存在するかチェック (State経由またはvisibilityチェック)
+      // ここでは簡易的に「データがあれば表示」としたいが、ViewはStateを直接持っているので確認
+      if (this.state.latestSegmentation) {
+        this.els.canvases.output.style.visibility = 'visible';
+      }
+    }
   }
 
   updatePaletteUI() {
@@ -438,36 +509,29 @@ class AppView {
   }
 
   drawResult(resultLabelMap) {
-    // inputData (グレースケール画像) を参照するために取得
-    const { width, height, inputData } = this.state;
+    const { width, height, inputData } = this.state; // inputData取得
     const ctx = this.els.ctx.output;
     const imgData = ctx.createImageData(width, height);
     const d = imgData.data;
 
+    // ... (ピクセルデータの構築ループは変更なし) ...
     for (let i = 0; i < width * height; i++) {
       const labelId = resultLabelMap[i];
-
       if (labelId >= 2) {
         const c = this.state.getColor(labelId);
-        // 入力画像の輝度を取得 (R成分に格納されている)
         const lum = inputData[i * 4];
-
-        // 乗算合成: 輝度 * (色 / 255)
-        // downloadImageと同じ計算式を適用
         d[i * 4 + 0] = Math.floor(lum * (c.r / 255));
         d[i * 4 + 1] = Math.floor(lum * (c.g / 255));
         d[i * 4 + 2] = Math.floor(lum * (c.b / 255));
-
-        // 不透明(255)にして、下にあるcanvasInput(グレースケール)を
-        // この「色付き乗算画像」で完全に上書きする
         d[i * 4 + 3] = 255;
       } else {
-        // 背景部分は透明のままにし、下のcanvasInputが見えるようにする
         d[i * 4 + 3] = 0;
       }
     }
+
     ctx.putImageData(imgData, 0, 0);
-    this.els.canvases.output.style.visibility = 'visible';
+
+    this.updateLayerVisibility();
   }
   
   updateDownloadButtons(hasResult) {
@@ -701,18 +765,33 @@ export async function main() {
     onDownloadImage: () => {
       if (!state.latestSegmentation) return;
       const { width, height, inputData, latestSegmentation } = state;
+      const isTransparent = view.els.chkTransparent.checked;
       downloadBufferAsImage(width, height, (data) => {
         for (let i = 0; i < width * height; i++) {
           const labelId = latestSegmentation[i];
           const luminance = inputData[i * 4];
           if (labelId >= 2) {
+            // 前景: 乗算合成
             const c = state.getColor(labelId);
             data[i * 4 + 0] = Math.floor(luminance * (c.r / 255));
             data[i * 4 + 1] = Math.floor(luminance * (c.g / 255));
             data[i * 4 + 2] = Math.floor(luminance * (c.b / 255));
             data[i * 4 + 3] = 255;
           } else {
-            data[i * 4 + 0] = 0; data[i * 4 + 1] = 0; data[i * 4 + 2] = 0; data[i * 4 + 3] = 0;
+            // 背景: チェックボックスに応じて分岐
+            if (isTransparent) {
+              // 透過
+              data[i * 4 + 0] = 0;
+              data[i * 4 + 1] = 0;
+              data[i * 4 + 2] = 0;
+              data[i * 4 + 3] = 0;
+            } else {
+              // 白背景
+              data[i * 4 + 0] = 255;
+              data[i * 4 + 1] = 255;
+              data[i * 4 + 2] = 255;
+              data[i * 4 + 3] = 255;
+            }
           }
         }
       }, 'result_image.png');

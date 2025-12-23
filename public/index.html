@@ -25,13 +25,34 @@
   <div id="panel-top" class="panel">
     <h1>LazyFill</h1>
 
-    <button id="btnRun" class="btn-primary">▶ Run Graph Cut</button>
-    <button id="btnDownloadImg" class="btn-secondary" disabled>⇩ Image</button>
-    <button id="btnDownloadMask" class="btn-secondary" disabled>⇩ Mask</button>
+    <div
+      style="display: flex; align-items: center; margin-right: 15px; background: rgba(0,0,0,0.05); padding: 5px 10px; border-radius: 4px;">
+      <span style="margin-right: 5px; font-size: 0.9rem;">🔎</span>
+      <input type="number" id="inpZoomLevel" value="100" step="10" min="1" max="10000"
+        style="width: 50px; text-align: right; border: 1px solid #ccc; border-radius: 4px; padding: 4px;">
+      <span style="margin-left: 3px; font-size: 0.9rem;">%</span>
+    </div>
+
+    <button id="btnRun" class="btn-primary">▶ 塗りつぶし実行</button>
+
+    <label style="margin: 0 10px; cursor: pointer; user-select: none;">
+      <input type="checkbox" id="chkDynamic" checked>
+      <span style="margin-left: 5px;">自動更新</span>
+    </label>
+    
+    <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-left: 10px;">
+      <div style="display: flex; gap: 5px;">
+        <button id="btnDownloadImg" class="btn-secondary" disabled>⇩ 画像保存</button>
+        <label style="margin: 0 10px; cursor: pointer; user-select: none;">
+          <input type="checkbox" id="chkTransparent" checked> 背景透過
+        </label>
+        <button id="btnDownloadMask" class="btn-secondary" disabled>⇩ マスク保存</button>
+      </div>
+    </div>
 
     <div style="width: 1px; height: 30px; background: #ddd; margin: 0 10px;"></div>
 
-    <button id="btnToggleParams" class="btn-secondary">⚙️ Params</button>
+    <button id="btnToggleParams" class="btn-secondary">⚙️ 詳細設定</button>
   </div>
 
   <div id="panel-params" class="panel hidden">
@@ -70,17 +91,16 @@
   <div id="panel-tools" class="panel">
     <h3>Tools & Palette</h3>
 
-    <label style="font-size: 1.1rem; padding: 5px 0; border-bottom: 1px solid #eee;">
-      <input type="checkbox" id="chkDynamic" checked>
-      <span>Dynamic Update</span>
-    </label>
+    <div style="margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+      <label style="margin: 0; cursor: pointer; user-select: none; font-weight: bold;">
+        <input type="checkbox" id="chkShowMarker">
+        マーカー表示
+      </label>
+    </div>
 
-    <div style="margin: 15px 0;">
+    <div style="margin: 0 0 15px 0;">
       <div class="row">
         <span>Brush Size: <strong id="dispBrushSize">2</strong>px</span>
-        <label style="margin:0; font-size:0.9rem;">
-          <input type="checkbox" id="chkHideMarker"> Hide
-        </label>
       </div>
       <input type="range" id="inpBrushSize" min="1" max="50" value="2">
     </div>

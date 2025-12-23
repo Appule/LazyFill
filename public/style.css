@@ -43,6 +43,13 @@ body {
   box-shadow: inset 0 0 0 4px var(--color-accent);
 }
 
+canvas {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
 /* 中央にメッセージを表示するための簡易コンテナ */
 #drop-message {
   position: absolute;
