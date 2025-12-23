@@ -410,7 +410,7 @@ class AppView {
     this.els.brushGuide.style.display = 'block';
 
     // ブラシ半径(px) * 2 * 表示倍率 = 画面上の直径
-    const diameter = (this.state.brushSize * 2) * this.transform.scale;
+    const diameter = (this.state.brushSize * 2 - 1) * this.transform.scale;
 
     const guide = this.els.brushGuide;
     guide.style.width = `${diameter}px`;
@@ -549,21 +549,53 @@ class AppView {
     ctx.putImageData(imgData, 0, 0);
   }
 
-  drawCircle(cx, cy, r, labelId) {
-    const c = this.state.getColor(labelId);
+  updateMarkerRect(minX, minY, maxX, maxY) {
+    const { width, height, markerBuffer } = this.state;
+
+    // 範囲を画像内にクリップ
+    minX = Math.max(0, minX);
+    minY = Math.max(0, minY);
+    maxX = Math.min(width - 1, maxX);
+    maxY = Math.min(height - 1, maxY);
+
+    const w = maxX - minX + 1;
+    const h = maxY - minY + 1;
+
+    if (w <= 0 || h <= 0) return;
+
     const ctx = this.els.ctx.marker;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-    if (labelId === 0) {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fill();
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${c.a})`;
-      ctx.fill();
+    const imgData = ctx.getImageData(minX, minY, w, h);
+    const data = imgData.data;
+
+    // 指定矩形内のみループしてデータ更新
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // markerBuffer上の絶対座標
+        const globalX = minX + x;
+        const globalY = minY + y;
+        const idx = globalY * width + globalX;
+        const labelId = markerBuffer[idx];
+
+        // ImageData上のインデックス
+        const dataIdx = (y * w + x) * 4;
+
+        if (labelId !== 0) {
+          const c = this.state.getColor(labelId);
+          data[dataIdx + 0] = c.r;
+          data[dataIdx + 1] = c.g;
+          data[dataIdx + 2] = c.b;
+          data[dataIdx + 3] = Math.floor(c.a * 255);
+        } else {
+          // 消しゴム(ID:0)部分は透明にする
+          data[dataIdx + 0] = 0;
+          data[dataIdx + 1] = 0;
+          data[dataIdx + 2] = 0;
+          data[dataIdx + 3] = 0;
+        }
+      }
     }
-    ctx.restore();
+
+    ctx.putImageData(imgData, minX, minY);
   }
 
   updateLayerVisibility() {
@@ -843,31 +875,81 @@ export async function main() {
     onClearMarkers: () => { state.markerBuffer.fill(0); state.isMarkerDirty = true; state.labelPixelCounts = {}; view.redrawMarkerCanvas(); },
 
     onDraw: (cx, cy, isEraser) => {
-      const r = state.brushSize;
+      let r = state.brushSize;
       const labelId = isEraser ? 0 : state.currentLabelId;
-
-      view.drawCircle(cx, cy, r, labelId);
-
       const { width, height, markerBuffer } = state;
-      const r2 = r * r;
-      const minX = Math.max(0, cx - r);
-      const maxX = Math.min(width - 1, cx + r);
-      const minY = Math.max(0, cy - r);
-      const maxY = Math.min(height - 1, cy + r);
 
-      for (let y = minY; y <= maxY; y++) {
-        for (let x = minX; x <= maxX; x++) {
-          if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r2) {
-            const idx = y * width + x;
-            const oldId = markerBuffer[idx];
-            if (oldId !== labelId) {
-              state.updatePixelCount(oldId, -1);
-              state.updatePixelCount(labelId, 1);
-              markerBuffer[idx] = labelId;
-              state.isMarkerDirty = true;
+      // 更新があったかどうかのフラグ
+      let changed = false;
+
+      // 更新範囲（バウンディングボックス）の記録用
+      let updateMinX = width, updateMinY = height;
+      let updateMaxX = 0, updateMaxY = 0;
+
+      // --- 1. ピクセル更新ロジック ---
+
+      if (r === 1) {
+        // 【サイズ1の場合】カーソル直下の1ピクセルのみ
+        // cx, cy は既にMath.floorされている整数座標
+        if (cx >= 0 && cx < width && cy >= 0 && cy < height) {
+          const idx = cy * width + cx;
+          const oldId = markerBuffer[idx];
+
+          if (oldId !== labelId) {
+            state.updatePixelCount(oldId, -1);
+            state.updatePixelCount(labelId, 1);
+            markerBuffer[idx] = labelId;
+            state.isMarkerDirty = true;
+
+            // 更新範囲は1点
+            updateMinX = cx; updateMaxX = cx;
+            updateMinY = cy; updateMaxY = cy;
+            changed = true;
+          }
+        }
+      } else {
+        // 【サイズ2以上の場合】円形範囲
+        // 半径計算: r=2なら中心+1pxなど、好みに応じて調整可能ですが、
+        // ここでは従来の仕様に準拠しつつ、rを半径として扱います。
+        r -= 1;
+        const r2 = r * r; // 半径の二乗 (距離判定用)
+
+        // 探索範囲
+        const minX = Math.max(0, cx - r);
+        const maxX = Math.min(width - 1, cx + r);
+        const minY = Math.max(0, cy - r);
+        const maxY = Math.min(height - 1, cy + r);
+
+        for (let y = minY; y <= maxY; y++) {
+          for (let x = minX; x <= maxX; x++) {
+            // 円の内側判定
+            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r2) {
+              const idx = y * width + x;
+              const oldId = markerBuffer[idx];
+
+              if (oldId !== labelId) {
+                state.updatePixelCount(oldId, -1);
+                state.updatePixelCount(labelId, 1);
+                markerBuffer[idx] = labelId;
+                state.isMarkerDirty = true;
+                changed = true;
+
+                // 更新範囲を拡張
+                if (x < updateMinX) updateMinX = x;
+                if (x > updateMaxX) updateMaxX = x;
+                if (y < updateMinY) updateMinY = y;
+                if (y > updateMaxY) updateMaxY = y;
+              }
             }
           }
         }
+      }
+
+      // --- 2. 描画反映 (同期) ---
+
+      if (changed) {
+        // 変更があった矩形領域のみを再描画する
+        view.updateMarkerRect(updateMinX, updateMinY, updateMaxX, updateMaxY);
       }
     },
 
