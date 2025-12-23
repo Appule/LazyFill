@@ -93,10 +93,24 @@ export function convertToGrayscale(data) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    const a = data[i + 3] / 255.0; // 0.0 ~ 1.0 に正規化
+
+    // 白背景(255)とのアルファブレンディング計算
+    // C_result = C_foreground * alpha + C_background * (1 - alpha)
+    const r_flat = r * a + 255 * (1 - a);
+    const g_flat = g * a + 255 * (1 - a);
+    const b_flat = b * a + 255 * (1 - a);
+
+    // 合成後の色で輝度計算
+    const y = 0.299 * r_flat + 0.587 * g_flat + 0.114 * b_flat;
+
     data[i] = y;     // R
     data[i + 1] = y; // G
     data[i + 2] = y; // B
+
+    // 【重要】透明情報は白として焼き込んだので、ピクセル自体は不透明(255)にする
+    // これにより、後続のCanvas描画やダウンロード処理で色が正しく表示されます
+    data[i + 3] = 255;
   }
 }
 
