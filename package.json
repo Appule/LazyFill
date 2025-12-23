@@ -4,7 +4,10 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win --x64"
+    "build": "npm version patch --no-git-tag-version && npm run build:exe",
+    "build:minor": "npm version minor --no-git-tag-version && npm run build:exe",
+    "build:major": "npm version major --no-git-tag-version && npm run build:exe",
+    "build:exe": "electron-builder --win --x64"
   },
   "repository": {
     "type": "git",
