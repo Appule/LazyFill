@@ -17,8 +17,8 @@ class AppState {
     this.latestSegmentation = null; // Uint8Array or similar
     this.labels = {
       0: { r: 0, g: 0, b: 0, a: 0.0, hex: '#000000' },      // Eraser (Alpha 0)
-      1: { r: 0, g: 0, b: 255, a: 0.6, hex: '#0000ff' },    // BG
-      2: { r: 255, g: 0, b: 0, a: 0.6, hex: '#ff0000' }     // Default Object
+      1: { r: 0, g: 0, b: 255, a: 1.0, hex: '#0000ff' },    // BG
+      2: { r: 255, g: 0, b: 0, a: 1.0, hex: '#ff0000' }     // Default Object
     };
     this.labelPixelCounts = {};
     this.isMarkerDirty = false;
@@ -55,7 +55,7 @@ class AppState {
     const b = Math.floor(Math.random() * 200);
     const hex = "#" + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
 
-    this.labels[newId] = { r, g, b, a: 0.6, hex };
+    this.labels[newId] = { r, g, b, a: 1.0, hex };
     return newId;
   }
   
