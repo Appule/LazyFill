@@ -17,8 +17,8 @@
     </div>
 
     <div id="drop-message">
-      <div>📂 Drag & Drop Image Here</div>
-      <div style="font-size: 1rem; margin-top: 10px;">(or paste from clipboard)</div>
+      <div>📂 ここに画像をドロップ</div>
+      <div style="font-size: 1rem; margin-top: 10px;">(もしくはクリップボードからペースト)</div>
     </div>
   </div>
 
@@ -57,7 +57,7 @@
 
   <div id="panel-params" class="panel hidden">
     <h3>
-      Parameters
+      詳細設定
       <button class="panel-toggle-btn"
         onclick="document.getElementById('panel-params').classList.add('hidden')">×</button>
     </h3>
@@ -89,7 +89,7 @@
   </div>
 
   <div id="panel-tools" class="panel">
-    <h3>Tools & Palette</h3>
+    <h3>ツール & パレット</h3>
 
     <div style="margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
       <label style="margin: 0; cursor: pointer; user-select: none; font-weight: bold;">
@@ -100,7 +100,7 @@
 
     <div style="margin: 0 0 15px 0;">
       <div class="row">
-        <span>Brush Size: <strong id="dispBrushSize">2</strong>px</span>
+        <span>ブラシサイズ: <strong id="dispBrushSize">2</strong>px</span>
       </div>
       <input type="range" id="inpBrushSize" min="1" max="50" value="2">
     </div>
@@ -108,9 +108,9 @@
     <div class="color-row">
       <input type="color" id="colorPicker" value="#0000ff">
       <div style="display: flex; flex-direction: column; flex: 1;">
-        <span id="currentLabelName" style="font-weight: bold; font-size: 1.1rem;">Obj 2</span>
+        <span id="currentLabelName" style="font-weight: bold; font-size: 1.1rem;">色2</span>
         <div style="display: flex; align-items: center; gap: 5px; margin-top: 5px;">
-          <span style="font-size: 0.9rem;">Alpha:</span>
+          <span style="font-size: 0.9rem;">透明度:</span>
           <input type="number" id="alphaInput" value="0.6" step="0.1" min="0.1" max="1.0" style="width: 60px;">
         </div>
       </div>
@@ -120,14 +120,14 @@
     </div>
 
     <div style="display: flex; gap: 10px; margin-top: 10px;">
-      <button id="btnAddLabel" class="btn-large-action" style="flex: 2;">+ Add</button>
-      <button id="btnDeleteLabel" class="btn-large-action" style="flex: 1;" disabled>- Del</button>
+      <button id="btnAddLabel" class="btn-large-action" style="flex: 2;">+ 追加</button>
+      <button id="btnDeleteLabel" class="btn-large-action" style="flex: 1;" disabled>- 削除</button>
     </div>
-    <button id="btnClearMarkers" class="btn-large-action" style="margin-top: 10px;">🗑 Clear All</button>
+    <button id="btnClearMarkers" class="btn-large-action" style="margin-top: 10px;">🗑 マーカーをクリア</button>
 
     <div style="margin-top: 15px; color: #666; font-size: 0.9rem; text-align: center;">
-      Shift + Drag to Erase<br>
-      Middle Drag to Pan / Wheel to Zoom
+      Shiftドラッグ：消しゴム<br>
+      ホイールドラッグ：カメラ移動
     </div>
   </div>
 

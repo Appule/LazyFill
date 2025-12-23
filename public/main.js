@@ -475,7 +475,7 @@ class AppView {
       const c = this.state.labels[id];
       const btn = document.createElement('button');
       btn.className = 'label-btn';
-      btn.textContent = id === 1 ? `BG` : `Col${id}`;
+      btn.textContent = id === 1 ? `背景` : `色 ${id}`;
       btn.style.backgroundColor = c.hex;
       const brightness = (c.r * 299 + c.g * 587 + c.b * 114) / 1000;
       btn.style.color = brightness > 125 ? 'black' : 'white';
@@ -504,7 +504,7 @@ class AppView {
     const curr = this.state.getColor(currId);
     this.els.colorPicker.value = curr.hex;
     this.els.alphaInput.value = curr.a;
-    this.els.currentLabelName.textContent = currId === 1 ? `BG (1)` : `Col ${currId}`;
+    this.els.currentLabelName.textContent = currId === 1 ? `背景` : `色 ${currId}`;
     this.els.btnDeleteLabel.disabled = (currId === 1);
   }
 
