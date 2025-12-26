@@ -12,10 +12,9 @@
     <div id="loadingSpinner"></div>
     <div id="brushGuide"></div>
     <div id="canvasContainer" style="position: absolute; top: 0; left: 0; transform-origin: 0 0;">
-      <canvas id="canvasInput" style="display: block;"></canvas>
-      <canvas id="canvasMarker" style="position: absolute; top: 0; left: 0; cursor: crosshair;"></canvas>
-      <canvas id="canvasOutput"
-        style="position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none;"></canvas>
+      <canvas id="canvasInput" style="display: block; z-index: 1;"></canvas>
+      <canvas id="canvasOutput" style="position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; z-index: 2;"></canvas>
+      <canvas id="canvasMarker" style="position: absolute; top: 0; left: 0; cursor: crosshair; z-index: 3;"></canvas>
     </div>
 
     <div id="drop-message">
@@ -41,7 +40,7 @@
       <div style="display: flex; gap: 5px;">
         <button id="btnDownloadImg" class="btn-secondary" disabled>⇩ 画像保存</button>
         <label style="margin: 0 10px; cursor: pointer; user-select: none;">
-          <input type="checkbox" id="chkTransparent" checked> 背景透過
+          <input type="checkbox" id="chkTransparent"> 背景透過
         </label>
         <button id="btnDownloadMask" class="btn-secondary" disabled>⇩ マスク保存</button>
       </div>

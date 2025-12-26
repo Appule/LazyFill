@@ -34,6 +34,9 @@ body {
   height: 100%;
   z-index: 1;
   cursor: default;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   /* ドロップ受け入れ時の視覚効果用 */
   transition: background-color 0.2s;
 }
@@ -43,15 +46,30 @@ body {
   box-shadow: inset 0 0 0 4px var(--color-accent);
 }
 
+#canvasContainer {
+  position: relative;
+  margin: 0 auto;
+  /* 画像ロード時にJSでwidth/heightが設定される想定ですが、念のため */
+  display: block;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+}
+
+/* 全てのCanvasを左上に固定して重ねる */
 canvas {
-  image-rendering: -moz-crisp-edges;
-  image-rendering: -webkit-crisp-edges;
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* ドット絵ライクな表示（前回の要望） */
   image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
 }
 
 /* 中央にメッセージを表示するための簡易コンテナ */
 #drop-message {
+  /* キャンバス(z-index: 0~10)より後ろにする */
+  z-index: -1;
+  /* 必要に応じて配置調整 */
   position: absolute;
   top: 50%;
   left: 50%;

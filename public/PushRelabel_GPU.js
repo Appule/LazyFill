@@ -125,7 +125,7 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
       const i = rowOffset + x;
       const h = finalHeights[i];
 
-      if (labelMapData[i] === 2 || h >= threshold) {
+      if (h >= threshold) {
         segmentation[i] = 1;
       } else {
         segmentation[i] = 0;

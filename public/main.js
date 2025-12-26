@@ -3,6 +3,7 @@ import { extractNormalizedR } from './flatDataUtils.js';
 import { imageProc } from './wgpuProc.js';
 import { runJumpFloodingWebGPU } from './JFA_GPU.js';
 import { runPushRelabelWebGPU } from './PushRelabel_GPU.js';
+import { MarkerRenderer } from './MarkerRenderer.js';
 
 // ==========================================
 // 1. STATE
@@ -107,6 +108,7 @@ class AppView {
   constructor(state, handlers) {
     this.state = state;
     this.handlers = handlers;
+    this.markerRenderer = new MarkerRenderer();
 
     this.transform = {
       scale: 1.0,
@@ -169,7 +171,50 @@ class AppView {
       }
     };
 
+    this.init();
     this.bindEvents();
+  }
+
+  async init() {
+    await this.markerRenderer.init();
+
+    // 【追加】ピクセル描画（ドット絵ライク）を強制するCSSスタイルを適用
+    // CSSファイルに書いても良いですが、ここで確実に適用します
+    const canvasStyle = 'image-rendering: pixelated; image-rendering: crisp-edges;';
+    Object.values(this.els.canvases).forEach(c => {
+      c.style = canvasStyle;
+    });
+  }
+
+  async redrawMarkers() {
+    if (!this.state.markerBuffer) return;
+    const { width, height, markerBuffer, labels } = this.state;
+
+    // WebGPUレンダラーでピクセルデータを生成 (枠線付き)
+    const pixelData = await this.markerRenderer.render(width, height, markerBuffer, labels);
+    const imgData = new ImageData(pixelData, width, height);
+
+    // Canvasをクリアして描き直す
+    this.els.ctx.marker.clearRect(0, 0, width, height);
+    this.els.ctx.marker.putImageData(imgData, 0, 0);
+  }
+
+  drawPreviewCircle(cx, cy, radius, colorHex) {
+    const ctx = this.els.ctx.marker;
+    ctx.fillStyle = colorHex;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawPreviewEraser(cx, cy, radius) {
+    const ctx = this.els.ctx.marker;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   bindEvents() {
@@ -227,13 +272,6 @@ class AppView {
       this.els.panelParams.classList.toggle('hidden');
     });
 
-    this.els.chkTransparent.addEventListener('change', () => {
-      // 計算結果が存在する場合のみ再描画
-      if (this.state.latestSegmentation) {
-        this.drawResult(this.state.latestSegmentation);
-      }
-    });
-
     // --- Tools & Palette Actions ---
     // --- Tool Switching ---
     this.els.toolRadios.forEach(radio => {
@@ -246,7 +284,11 @@ class AppView {
       });
     });
 
+    // マーカー表示切替: Viewのメソッドを直接呼ぶ（ご提示のパターン）
     this.els.chkShowMarker.addEventListener('change', () => this.updateLayerVisibility());
+
+    // 背景透過切替: 結果の再描画が必要なため Handler 経由にする
+    this.els.chkTransparent.addEventListener('change', () => this.handlers.onToggleTransparent());
 
     this.els.btnAutoMark.addEventListener('click', () => {
       this.handlers.onAutoMark();
@@ -530,34 +572,32 @@ class AppView {
   }
 
   resizeCanvases(w, h) {
-    Object.values(this.els.canvases).forEach(c => { c.width = w; c.height = h; });
-    this.resetView(w, h);
+    // コンテナとキャンバスのサイズ設定
+    this.els.canvasContainer.style.width = w + 'px';
+    this.els.canvasContainer.style.height = h + 'px';
+
+    Object.values(this.els.canvases).forEach(c => {
+      c.width = w;
+      c.height = h;
+    });
+
+    // 【修正】画面中央に来るようにオフセットを計算する
+    const vw = this.els.viewport.clientWidth;
+    const vh = this.els.viewport.clientHeight;
+
+    // (ビューポート - 画像) / 2 で中央位置を算出
+    // 画像の方が大きい場合はマイナスになり、正しく中央基準ではみ出します
+    const startX = Math.floor((vw - w) / 2);
+    const startY = Math.floor((vh - h) / 2);
+
+    // 初期化 (scale: 1.0, x: 中央, y: 中央)
+    this.transform = { scale: 1.0, x: startX, y: startY };
+    this.updateTransform();
   }
 
   drawInputImage(img) {
     this.els.ctx.input.drawImage(img, 0, 0);
     this.els.canvases.output.style.visibility = 'hidden';
-  }
-
-  redrawMarkerCanvas() {
-    const { width, height, markerBuffer } = this.state;
-    if (width === 0) return;
-    const ctx = this.els.ctx.marker;
-    ctx.clearRect(0, 0, width, height);
-
-    const imgData = ctx.createImageData(width, height);
-    const data = imgData.data;
-    for (let i = 0; i < width * height; i++) {
-      const labelId = markerBuffer[i];
-      if (labelId !== 0) {
-        const c = this.state.getColor(labelId);
-        data[i * 4 + 0] = c.r;
-        data[i * 4 + 1] = c.g;
-        data[i * 4 + 2] = c.b;
-        data[i * 4 + 3] = Math.floor(c.a * 255);
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
   }
 
   updateMarkerRect(minX, minY, maxX, maxY) {
@@ -610,23 +650,24 @@ class AppView {
   }
 
   updateLayerVisibility() {
-    const showMarker = this.els.chkShowMarker.checked;
+    const hasResult = !!this.state.latestSegmentation;
+    const showMarker = document.getElementById('chkShowMarker').checked;
 
-    // 1. マーカーレイヤー (canvasMarker) の制御
-    if (showMarker) {
-      this.els.canvases.marker.style.opacity = '1.0';
-    } else {
-      // マーカーOFF -> 完全透明 (0)
-      this.els.canvases.marker.style.opacity = '0';
-    }
+    // 1. Input Canvas (元画像)
+    // 結果があれば非表示、なければ表示
+    this.els.canvases.input.style.display = hasResult ? 'none' : 'block';
+    this.els.canvases.input.style.zIndex = 0;
 
-    // 2. マスクレイヤー (canvasOutput) の制御
-    // 結果がある場合のみ表示
-    if (this.state.latestSegmentation) {
-      this.els.canvases.output.style.visibility = 'visible';
-    } else {
-      this.els.canvases.output.style.visibility = 'hidden';
-    }
+    // 2. Output Canvas (結果)
+    // 結果があれば表示、なければ非表示
+    this.els.canvases.output.style.display = hasResult ? 'block' : 'none';
+    this.els.canvases.output.style.zIndex = 1;
+
+    // 3. Marker Canvas (マーカー)
+    // チェックボックスの状態に従う
+    this.els.canvases.marker.style.display = showMarker ? 'block' : 'none';
+    // マーカーは常に最前面
+    this.els.canvases.marker.style.zIndex = 10;
   }
 
   updatePaletteUI() {
@@ -673,43 +714,52 @@ class AppView {
     this.els.btnDeleteLabel.disabled = (currId === 1);
   }
 
-  drawResult(resultLabelMap) {
-    const { width, height, inputData } = this.state;
-    const ctx = this.els.ctx.output;
-    const imgData = ctx.createImageData(width, height);
-    const d = imgData.data;
-
-    // 【追加】現在の「背景透過」設定を取得
-    const isTransparent = this.els.chkTransparent.checked;
+  drawResult(labelMap) {
+    const { width, height, labels, inputData } = this.state;
+    const imgData = this.els.ctx.output.createImageData(width, height);
+    const data = imgData.data;
+    const isTransparent = document.getElementById('chkTransparent').checked;
 
     for (let i = 0; i < width * height; i++) {
-      const labelId = resultLabelMap[i];
-      const lum = inputData[i * 4];
+      const labelId = labelMap[i];
+      // 入力画像の輝度 (グレースケール前提なのでR成分を使用、または平均)
+      // inputDataはRGBAなので4倍してアクセス
+      const luminance = inputData[i * 4];
+
+      const idx = i * 4;
 
       if (labelId >= 2) {
-        // 前景（オブジェクト）: 乗算合成
-        const c = this.state.getColor(labelId);
-        d[i * 4 + 0] = Math.floor(lum * (c.r / 255));
-        d[i * 4 + 1] = Math.floor(lum * (c.g / 255));
-        d[i * 4 + 2] = Math.floor(lum * (c.b / 255));
-        d[i * 4 + 3] = 255;
+        // --- 前景 (マスクあり) ---
+        // 黒い線(輝度が低い)は残したい -> 色 * 輝度 (乗算合成)
+        const c = labels[labelId];
+        // 輝度(0~255) を 0.0~1.0 にして乗算
+        const lumRatio = luminance / 255.0;
+
+        data[idx] = c.r * lumRatio;     // R
+        data[idx + 1] = c.g * lumRatio; // G
+        data[idx + 2] = c.b * lumRatio; // B
+        data[idx + 3] = 255;            // A (不透明)
       } else {
-        // 背景: 設定に応じて分岐
+        // --- 背景 (マスクなし) ---
         if (isTransparent) {
-          d[i * 4 + 0] = 0;
-          d[i * 4 + 1] = 0;
-          d[i * 4 + 2] = 0;
-          d[i * 4 + 3] = 255 - lum;
+          // 背景透過ON: アルファ値を 1.0 - 輝度 とする
+          // 白い部分(255) -> 透明(0), 黒い線(0) -> 不透明(255)
+          data[idx] = 0; // 色は黒にしておく（線用）
+          data[idx + 1] = 0;
+          data[idx + 2] = 0;
+          data[idx + 3] = 255 - luminance;
         } else {
-          d[i * 4 + 0] = lum;
-          d[i * 4 + 1] = lum;
-          d[i * 4 + 2] = lum;
-          d[i * 4 + 3] = 255;
+          // 背景透過OFF: 不透明 (元画像をそのまま表示)
+          data[idx] = luminance;
+          data[idx + 1] = luminance;
+          data[idx + 2] = luminance;
+          data[idx + 3] = 255;
         }
       }
     }
+    this.els.ctx.output.putImageData(imgData, 0, 0);
 
-    ctx.putImageData(imgData, 0, 0);
+    // 描画後にレイヤー表示を更新（結果が出たのでInputを隠すため）
     this.updateLayerVisibility();
   }
   
@@ -940,6 +990,11 @@ export async function main() {
   const handlers = {
     onFileLoad: (file) => {
       if (!file) return;
+
+      if (view.els.dropMessage) {
+        view.els.dropMessage.style.display = 'none';
+      }
+
       const img = new Image();
       img.onload = () => {
         // Prepare View
@@ -957,6 +1012,9 @@ export async function main() {
 
           view.updatePaletteUI();
           view.updateDownloadButtons(false);
+
+          view.updateLayerVisibility();
+          view.redrawMarkers();
         });
       };
       img.src = URL.createObjectURL(file);
@@ -970,10 +1028,11 @@ export async function main() {
         await GraphCutService.execAutoMark(state, params.bbThreshold, params.padding);
         state.isMarkerDirty = true;
 
+        await view.redrawMarkers();
+
         // if chk dynamic, auto run
         if (params.isDynamic) handlers.onRun();
 
-        view.redrawMarkerCanvas();
       } catch (e) {
         console.error(e);
         alert("Auto Mark Error: " + e.message);
@@ -982,58 +1041,75 @@ export async function main() {
 
     onLabelSelect: (id) => { state.currentLabelId = id; view.updatePaletteUI(); view.setToolMode('brush'); },
     onAddLabel: () => { state.currentLabelId = state.addLabel(); view.updatePaletteUI(); },
-    onDeleteLabel: () => { state.removeLabel(state.currentLabelId); state.isMarkerDirty = true; view.updatePaletteUI(); view.redrawMarkerCanvas(); },
+    onDeleteLabel: () => { state.removeLabel(state.currentLabelId); state.isMarkerDirty = true; view.updatePaletteUI(); view.redrawMarkers(); },
     onColorChange: (hex) => { 
-      state.updateLabelColor(state.currentLabelId, hex); view.updatePaletteUI(); view.redrawMarkerCanvas();
+      state.updateLabelColor(state.currentLabelId, hex); view.updatePaletteUI(); view.redrawMarkers();
       if (state.latestSegmentation) view.drawResult(state.latestSegmentation);
     },
     onAlphaChange: (alpha) => {
-      state.updateLabelColor(state.currentLabelId, undefined, alpha); view.redrawMarkerCanvas();
+      state.updateLabelColor(state.currentLabelId, undefined, alpha); view.redrawMarkers();
       if (state.latestSegmentation) view.drawResult(state.latestSegmentation);
     },
-    onClearMarkers: () => { state.markerBuffer.fill(0); state.isMarkerDirty = true; state.labelPixelCounts = {}; view.redrawMarkerCanvas(); },
+    onToggleMarker: () => {
+      view.updateLayerVisibility();
+    },
+
+    onToggleTransparent: () => {
+      if (state.latestSegmentation) {
+        view.drawResult(state.latestSegmentation);
+      }
+    },
+
+    onClearMarkers: () => {
+      state.markerBuffer.fill(0);
+      state.isMarkerDirty = true;
+      state.labelPixelCounts = {};
+
+      // マーカーが消えるので、結果もクリアすべき場合はここで制御
+      // 今回はマーカーだけ消す挙動とします
+      view.redrawMarkers();
+    },
 
     onDraw: (cx, cy, isEraser) => {
       let r = state.brushSize;
       const labelId = isEraser ? 0 : state.currentLabelId;
       const { width, height, markerBuffer } = state;
 
-      // 更新があったかどうかのフラグ
-      let changed = false;
+      // ViewのContext準備
+      const ctx = view.els.ctx.marker;
 
-      // 更新範囲（バウンディングボックス）の記録用
-      let updateMinX = width, updateMinY = height;
-      let updateMaxX = 0, updateMaxY = 0;
+      // 色の準備 (消しゴムなら透明にするための設定)
+      if (isEraser) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(0,0,0,1)'; // 色は何でも良い
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = state.getColor(labelId).hex;
+      }
 
-      // --- 1. ピクセル更新ロジック ---
+      // --- ピクセル更新ループ ---
+      // サイズ1の場合とサイズ2以上の場合で共通化して記述することも可能ですが、
+      // 既存ロジックを維持しつつ、更新があった場所だけ fillRect します。
 
       if (r === 1) {
-        // 【サイズ1の場合】カーソル直下の1ピクセルのみ
-        // cx, cy は既にMath.floorされている整数座標
         if (cx >= 0 && cx < width && cy >= 0 && cy < height) {
           const idx = cy * width + cx;
           const oldId = markerBuffer[idx];
-
           if (oldId !== labelId) {
+            // Model Update
             state.updatePixelCount(oldId, -1);
             state.updatePixelCount(labelId, 1);
             markerBuffer[idx] = labelId;
             state.isMarkerDirty = true;
 
-            // 更新範囲は1点
-            updateMinX = cx; updateMaxX = cx;
-            updateMinY = cy; updateMaxY = cy;
-            changed = true;
+            // 【修正】View Update: バッファが変わったこの1点を描画
+            ctx.fillRect(cx, cy, 1, 1);
           }
         }
       } else {
-        // 【サイズ2以上の場合】円形範囲
-        // 半径計算: r=2なら中心+1pxなど、好みに応じて調整可能ですが、
-        // ここでは従来の仕様に準拠しつつ、rを半径として扱います。
+        // 円形範囲
         r -= 1;
-        const r2 = r * r; // 半径の二乗 (距離判定用)
-
-        // 探索範囲
+        const r2 = r * r;
         const minX = Math.max(0, cx - r);
         const maxX = Math.min(width - 1, cx + r);
         const minY = Math.max(0, cy - r);
@@ -1041,58 +1117,45 @@ export async function main() {
 
         for (let y = minY; y <= maxY; y++) {
           for (let x = minX; x <= maxX; x++) {
-            // 円の内側判定
             if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r2) {
               const idx = y * width + x;
               const oldId = markerBuffer[idx];
 
               if (oldId !== labelId) {
+                // Model Update
                 state.updatePixelCount(oldId, -1);
                 state.updatePixelCount(labelId, 1);
                 markerBuffer[idx] = labelId;
                 state.isMarkerDirty = true;
-                changed = true;
 
-                // 更新範囲を拡張
-                if (x < updateMinX) updateMinX = x;
-                if (x > updateMaxX) updateMaxX = x;
-                if (y < updateMinY) updateMinY = y;
-                if (y > updateMaxY) updateMaxY = y;
+                // 【修正】View Update: バッファが変わったこの1点を描画
+                ctx.fillRect(x, y, 1, 1);
               }
             }
           }
         }
       }
 
-      // --- 2. 描画反映 (同期) ---
-
-      if (changed) {
-        // 変更があった矩形領域のみを再描画する
-        view.updateMarkerRect(updateMinX, updateMinY, updateMaxX, updateMaxY);
-      }
+      // 描画設定を戻す
+      ctx.globalCompositeOperation = 'source-over';
     },
 
-    onDrawEnd: () => {
-      const isMarkerVisible = view.els.chkShowMarker.checked;
-      if (!isMarkerVisible && view.getParameters().isDynamic && state.isMarkerDirty) {
+    onDrawEnd: async () => {
+      await view.redrawMarkers();
+      if (view.getParameters().isDynamic && state.isMarkerDirty) {
         handlers.onRun();
       }
     },
 
     onRun: async () => {
       const params = view.getParameters();
-
-      // 【追加】計算実行中にスピナーを表示
       view.setLoading(true);
-
-      // UI更新のための待機
       await new Promise(r => setTimeout(r, 10));
 
       try {
         const resultMap = await GraphCutService.run(state, params);
-
         if (resultMap) {
-          view.drawResult(resultMap);
+          view.drawResult(resultMap); // 内部で updateLayerVisibility も呼ばれる
           view.updateDownloadButtons(true);
           state.isMarkerDirty = false;
         }
@@ -1100,7 +1163,6 @@ export async function main() {
         console.error(e);
         alert("Run Error: " + e.message);
       } finally {
-        // 【追加】計算終了後にスピナーを非表示
         view.setLoading(false);
       }
     },
