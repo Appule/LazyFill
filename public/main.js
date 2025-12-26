@@ -124,6 +124,9 @@ class AppView {
       dropMessage: document.getElementById('drop-message'),
 
       // Top Bar
+      btnSave: document.getElementById('btnSave'),
+      btnLoad: document.getElementById('btnLoad'),
+      inpLoad: document.getElementById('inpLoad'),
       inpZoomLevel: document.getElementById('inpZoomLevel'),
       btnRun: document.getElementById('btnRun'),
       btnDownloadImg: document.getElementById('btnDownloadImg'),
@@ -257,6 +260,9 @@ class AppView {
     });
 
     // --- Top Bar Actions ---
+    this.els.btnSave.addEventListener('click', () => this.handlers.onSaveProject());
+    this.els.btnLoad.addEventListener('click', () => document.getElementById('inpLoad').click());
+    this.els.inpLoad.addEventListener('change', (e) => this.handlers.onLoadProject(e.target.files[0]));
     this.els.inpZoomLevel.addEventListener('change', (e) => {
       let percent = parseFloat(e.target.value);
       if (isNaN(percent) || percent <= 0) percent = 100;
@@ -1217,6 +1223,127 @@ export async function main() {
           }
         }
       }, 'result_mask.png');
+    },
+
+    onSaveProject: () => {
+      if (!state.isImageLoaded) {
+        alert("No image loaded.");
+        return;
+      }
+
+      // 1. マーカーをPNG Base64に変換
+      // 不可視のCanvasを作成して描画
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = state.width;
+      tempCanvas.height = state.height;
+      const ctx = tempCanvas.getContext('2d');
+      const imgData = ctx.createImageData(state.width, state.height);
+      const data = imgData.data;
+      const buffer = state.markerBuffer;
+
+      for (let i = 0; i < buffer.length; i++) {
+        const id = buffer[i];
+        // IDを赤チャンネルに格納 (IDが255以下である前提)
+        // IDが0なら透明、それ以外は不透明
+        data[i * 4 + 0] = id & 0xFF; // R
+        data[i * 4 + 1] = 0;         // G
+        data[i * 4 + 2] = 0;         // B
+        data[i * 4 + 3] = id > 0 ? 255 : 0; // Alpha
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const markerBase64 = tempCanvas.toDataURL('image/png');
+
+      // 2. JSONデータ構築
+      const projectData = {
+        version: 1.0,
+        width: state.width,
+        height: state.height,
+        params: view.getParameters(), // 現在のUIパラメータ
+        labels: state.labels,         // 色設定など
+        markers: markerBase64
+      };
+
+      // 3. ダウンロード処理
+      const blob = new Blob([JSON.stringify(projectData)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = "lazyfill_project.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    onLoadProject: (file) => {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const json = JSON.parse(e.target.result);
+
+          // 1. パラメータとラベルの復元 (これは常に実行)
+          // ※ view.setParameters のようなメソッドを作るか、個別に設定
+          if (json.params) {
+            // UIへの反映実装例
+            if (json.params.padding) document.getElementById('inpPadding').value = json.params.padding;
+            if (json.params.sigma) document.getElementById('inpSigma').value = json.params.sigma;
+            // ... 他のパラメータも同様に ...
+            // チェックボックス等も復元推奨
+          }
+
+          if (json.labels) {
+            state.labels = json.labels;
+            view.updatePaletteUI();
+          }
+
+          // 2. 画像サイズチェック
+          const currentW = state.width;
+          const currentH = state.height;
+
+          if (state.isImageLoaded && (json.width !== currentW || json.height !== currentH)) {
+            alert(`画像サイズが一致しません。\n現在: ${currentW}x${currentH}\n保存データ: ${json.width}x${json.height}\n\nマーカー以外の設定のみ読み込みました。`);
+            // マーカー読み込みはスキップ
+          } else if (state.isImageLoaded && json.markers) {
+            // 3. マーカーの復元 (サイズ一致時)
+            const img = new Image();
+            img.onload = () => {
+              const tempCanvas = document.createElement('canvas');
+              tempCanvas.width = currentW;
+              tempCanvas.height = currentH;
+              const ctx = tempCanvas.getContext('2d');
+              ctx.drawImage(img, 0, 0);
+
+              const imgData = ctx.getImageData(0, 0, currentW, currentH);
+              const data = imgData.data;
+
+              // バッファに書き戻し
+              state.markerBuffer.fill(0);
+              state.labelPixelCounts = {}; // カウントリセット
+
+              for (let i = 0; i < state.markerBuffer.length; i++) {
+                // 保存時に Rチャネル にIDを入れたので、そこから復元
+                const id = data[i * 4 + 0];
+                if (id > 0) {
+                  state.markerBuffer[i] = id;
+                  state.updatePixelCount(id, 1);
+                }
+              }
+
+              state.isMarkerDirty = true;
+              view.redrawMarkers();
+              handlers.onRun();
+              alert("プロジェクトを読み込みました。");
+            };
+            img.src = json.markers;
+          } else {
+            alert("画像がロードされていないか、マーカーデータがありません。設定のみ読み込みました。");
+          }
+
+        } catch (err) {
+          console.error(err);
+          alert("プロジェクトファイルの読み込みに失敗しました。");
+        }
+      };
+      reader.readAsText(file);
     }
   };
 
