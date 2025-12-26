@@ -1,11 +1,14 @@
 import { initWebGPU, createBuffer, loadWGSL, createPipeline, runKernel, readBuffer, createBindGroupWithBindings } from './wgpuUtils.js';
 
-export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityData, labelMapData, distanceMapData, options = {}) {
+export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityData, labelMapData, distanceMapData, options = {}, bbInfo = null) {
   const { device } = await initWebGPU();
   const maxIter = options.maxIter || 5000;
   const bfsFreq = options.bfsFreq || 500;
   const strength = options.strength || 0.95;
   const sigma = options.sigma || 0.3;
+
+  // BB情報の展開 (指定がない場合は画像全体)
+  const { minX, minY, width: bbW, height: bbH } = bbInfo || { minX: 0, minY: 0, width: imageWidth, height: imageHeight };
 
   // --- WGSL Load ---
   const initCode = await loadWGSL('./shaders/pr_init.wgsl');
@@ -22,11 +25,16 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
   };
 
   const numPixels = imageWidth * imageHeight;
-  const workgroups = [Math.ceil(imageWidth / 16), Math.ceil(imageHeight / 16), 1];
+  // 【重要】WorkgroupはBBのサイズに合わせて計算する (画像全体ではなく計算領域のみ起動)
+  const workgroups = [Math.ceil(bbW / 16), Math.ceil(bbH / 16), 1];
 
   // --- Buffers ---
-  // Params: [width, height, sigma, parity, strength, 0, 0, 0]
-  const paramsArray = new Float32Array([imageWidth, imageHeight, sigma, 0.0, strength, 0.0, 0.0, 0.0]);
+  // Params: [width, height, sigma, parity, strength, minX, minY, 0]
+  // WGSL側で struct Params { width: f32, height: f32, sigma: f32, parity: f32, strength: f32, minX: f32, minY: f32 } と定義されている想定
+  const paramsArray = new Float32Array([
+    imageWidth, imageHeight, sigma, 0.0,
+    strength, minX, minY, 0.0
+  ]);
   const paramsBuffer = createBuffer(device, paramsArray, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
   const intensityBuffer = createBuffer(device, new Float32Array(intensityData), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
@@ -54,12 +62,9 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
   });
 
   // 3. BFS Relabel (Global Relabeling: Sink -> Source)
-  // Re-uses hBuffer as output distance
   const bgBfsRelabelInit = createBindGroupWithBindings(device, pipelines.bfsRelabelInit, {
-    0: paramsBuffer, 1: labelBuffer, 2: distBufferA // A initialized
+    0: paramsBuffer, 1: labelBuffer, 2: distBufferA
   });
-  // Step A->B: Write B, then we will copy B to h later? 
-  // Optimization: Write directly to B, then B->A. Finally Copy A to h.
   const bgBfsRelabelStepAB = createBindGroupWithBindings(device, pipelines.bfsRelabelStep, {
     0: paramsBuffer, 1: capBuffer, 2: flowBuffer, 3: distBufferA, 4: distBufferB
   });
@@ -68,27 +73,28 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
   });
 
   // --- Execution Logic ---
-  console.log("Initializing...");
+  console.log("Initializing PR...");
   runKernel(device, [pipelines.init], [bgInit], [workgroups]);
 
-  const BFS_DIAMETER = Math.max(imageWidth, imageHeight);
+  // BFS_DIAMETER は画像全体ではなく、BBの対角線サイズ程度で十分だが、安全のためBBの最大辺をとる
+  const BFS_DIAMETER = Math.max(bbW, bbH);
+
   for (let i = 0; i < maxIter; i++) {
 
     // --- Periodic BFS (Global Relabeling) ---
-    // 高さが不正確になると収束が遅くなるため、定期的に正確な距離にリセットする
     if (i > 0 && i % bfsFreq === 0) {
-      // 1. Init: Sink=0, Others=INF
+      // 1. Init
       runKernel(device, [pipelines.bfsRelabelInit], [bgBfsRelabelInit], [workgroups]);
 
-      // 2. Propagate (Sink <- Source)
+      // 2. Propagate
       for (let k = 0; k < BFS_DIAMETER; k += 2) {
         runKernel(device, [pipelines.bfsRelabelStep], [bgBfsRelabelStepAB], [workgroups]);
         runKernel(device, [pipelines.bfsRelabelStep], [bgBfsRelabelStepBA], [workgroups]);
       }
 
-      // 3. Update H: Copy distBufferA (result) to hBuffer
-      // 専用カーネルを作るのがベストですが、ここではcopyBufferToBufferを使います
-      // ※hBuffer(u32)とdistBufferA(u32)はサイズ同じ
+      // 3. Update H: Copy distBufferA to hBuffer
+      // ここは BB内だけでよいが、copyBufferToBufferは連続領域のみ。
+      // 全体をコピーするか、あるいはCompute ShaderでBB内コピーをするのが最適だが、頻度が低いので全体コピーで妥協
       const byteSize = numPixels * 4;
       const commandEncoder = device.createCommandEncoder();
       commandEncoder.copyBufferToBuffer(distBufferA, 0, hBuffer, 0, byteSize);
@@ -97,6 +103,7 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
 
     // --- Push-Relabel Step (Checkerboard) ---
     const parity = i % 2;
+    // Update parity uniform (offset 12 bytes = float index 3)
     device.queue.writeBuffer(paramsBuffer, 12, new Float32Array([parity]));
     runKernel(device, [pipelines.step], [bgStep], [workgroups]);
   }
@@ -107,28 +114,26 @@ export async function runPushRelabelWebGPU(imageWidth, imageHeight, intensityDat
   // --- Process Results (CPU側で判定) ---
   const segmentation = new Uint8Array(numPixels);
   const normalizedHeights = new Float32Array(numPixels);
-  
-  // 閾値: 画像のサイズ(パスの最大長)の2倍以上なら、シンクに到達できない(ソース側)とみなす
-  const threshold = 2 * (imageWidth + imageHeight);
 
-  for (let i = 0; i < numPixels; i++) {
-    const h = finalHeights[i];
+  // 閾値: BBのサイズ基準で判定
+  const threshold = 2 * (bbW + bbH);
 
-    // 1. Segmentation Check
-    // ソースノード(Label 2) または 高さが閾値以上の場所を前景(1)とする
-    // ※Label 2は初期化でhが高い値になっているはずですが、念のためOR条件推奨
-    if (labelMapData[i] === 2 || h >= threshold) {
-      segmentation[i] = 1;
-    } else {
-      segmentation[i] = 0;
+  // BB内のみループして結果を構築（外側は0のまま）
+  for (let y = minY; y < minY + bbH; y++) {
+    const rowOffset = y * imageWidth;
+    for (let x = minX; x < minX + bbW; x++) {
+      const i = rowOffset + x;
+      const h = finalHeights[i];
+
+      if (labelMapData[i] === 2 || h >= threshold) {
+        segmentation[i] = 1;
+      } else {
+        segmentation[i] = 0;
+      }
+      normalizedHeights[i] = h / threshold;
     }
-
-    // 2. Normalize Heights
-    // 0.0 ~ 1.0 (以上) の範囲に正規化して出力
-    normalizedHeights[i] = h / threshold;
   }
 
-  // 戻り値から excess を削除し、heightsは正規化したものを返す
   return {
     segmentation: segmentation,
     heights: normalizedHeights

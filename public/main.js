@@ -771,7 +771,6 @@ const GraphCutService = {
 
     // 4方向スキャンで markerBuffer に書き込み
     // ※ 既にマーカーがある場所(markerBuffer[idx] !== 0)は上書きしない
-
     const writeMarker = (idx) => {
       if (markerBuffer[idx] === 0) {
         markerBuffer[idx] = targetId;
@@ -816,7 +815,7 @@ const GraphCutService = {
       }
     }
   },
-  
+
   async run(state, params) {
     if (!state.isImageLoaded) return;
 
@@ -832,7 +831,7 @@ const GraphCutService = {
 
     const finalLabelMap = new Uint8Array(numPixels).fill(0);
 
-    if (objectIds.length === 0) return null;
+    if (objectIds.length === 0) return finalLabelMap; // Return empty map if no objects
 
     // 1. 全体のBB計算
     let minX = width, minY = height, maxX = 0, maxY = 0;
@@ -866,46 +865,64 @@ const GraphCutService = {
 
     for (const targetId of objectIds) {
       const count = state.labelPixelCounts[targetId] || 0;
-      // (注: 前回の自動マークボタン化により、ここはcountチェックのみに戻しています)
       if (count <= 0) continue;
 
-      console.log(`Processing Obj ${targetId} (Size: ${bbWidth}x${bbHeight})`);
+      console.log(`Processing Obj ${targetId} (Size: ${bbWidth}x${bbHeight}, Offset: ${pMinX},${pMinY})`);
+
       const tempMarker = new Int32Array(numPixels);
 
-      for (let i = 0; i < numPixels; i++) {
-        const uid = state.markerBuffer[i];
-        if (uid === targetId) tempMarker[i] = 2;
-        else if (uid !== 0) tempMarker[i] = 1;
-        else tempMarker[i] = 0;
-      }
+      // CPU最適化: BB内のみ走査して tempMarker を作成
+      // 画像全体(numPixels)を舐めると遅いので、必要な矩形部分だけ処理
+      for (let y = pMinY; y <= pMaxY; y++) {
+        const rowOffset = y * width;
+        for (let x = pMinX; x <= pMaxX; x++) {
+          const idx = rowOffset + x;
+          const uid = state.markerBuffer[idx];
 
-      // BB外周にSink設置 (BB内だけ計算すればよくなる)
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          if (x < pMinX || x > pMaxX || y < pMinY || y > pMaxY) {
-            const idx = y * width + x;
-            if (tempMarker[idx] === 0) tempMarker[idx] = 1;
-          }
+          if (uid === targetId) tempMarker[idx] = 2; // Source
+          else if (uid !== 0) tempMarker[idx] = 1;   // Sink (Other objects)
+          else tempMarker[idx] = 0;                  // Unknown
         }
       }
 
-      // 【変更】JFAにBB情報を渡す
+      // BB外周にSink設置 (BB内だけ計算すればよくなる)
+      // Top & Bottom Edge of BB
+      for (let x = pMinX; x <= pMaxX; x++) {
+        const topIdx = pMinY * width + x;
+        const botIdx = pMaxY * width + x;
+        if (tempMarker[topIdx] === 0) tempMarker[topIdx] = 1;
+        if (tempMarker[botIdx] === 0) tempMarker[botIdx] = 1;
+      }
+      // Left & Right Edge of BB
+      for (let y = pMinY; y <= pMaxY; y++) {
+        const rowOffset = y * width;
+        const leftIdx = rowOffset + pMinX;
+        const rightIdx = rowOffset + pMaxX;
+        if (tempMarker[leftIdx] === 0) tempMarker[leftIdx] = 1;
+        if (tempMarker[rightIdx] === 0) tempMarker[rightIdx] = 1;
+      }
+
+      // JFAにBB情報を渡す
       const { distanceMap } = await runJumpFloodingWebGPU(width, height, tempMarker, bbInfo);
 
       const bfsFreq = params.bfsNum > 0 ? Math.floor(params.maxIter / params.bfsNum) : params.maxIter;
 
-      // 【変更】PushRelabelにBB情報を渡す
+      // PushRelabelにBB情報を渡す
       const prResult = await runPushRelabelWebGPU(
         width, height, normalizedR, tempMarker, distanceMap,
         { strength: params.strength, sigma: params.sigma, maxIter: params.maxIter, bfsFreq: bfsFreq },
-        bbInfo // 追加引数
+        bbInfo
       );
 
       const seg = prResult.segmentation;
 
-      // 結果のマージ (BB内のみ見れば少し速いが、JS側は単純なループのままで十分)
-      for (let i = 0; i < numPixels; i++) {
-        if (seg[i] === 1) finalLabelMap[i] = targetId;
+      // 結果のマージ (BB内のみ走査してマージ)
+      for (let y = pMinY; y <= pMaxY; y++) {
+        const rowOffset = y * width;
+        for (let x = pMinX; x <= pMaxX; x++) {
+          const i = rowOffset + x;
+          if (seg[i] === 1) finalLabelMap[i] = targetId;
+        }
       }
     }
 

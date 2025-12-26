@@ -4,11 +4,14 @@ import { initWebGPU, createBuffer, loadWGSL, createPipeline, runKernel, readBuff
  * Jump Flooding Algorithmを実行し、最近傍ラベルマップと距離マップを計算する
  * @param {number} width 画像幅
  * @param {number} height 画像高さ
- * @param {ArrayLike} labels ラベルデータ (0:Unknown, 1:BG, 2:FG などを想定)
- * @returns {Promise<{nearestLabelMap: Uint8Array, distanceMap: Float32Array}>}
+ * @param {ArrayLike} labels ラベルデータ
+ * @param {object} bbInfo { minX, minY, width, height }
  */
-export async function runJumpFloodingWebGPU(width, height, labels) {
+export async function runJumpFloodingWebGPU(width, height, labels, bbInfo = null) {
   const { device } = await initWebGPU();
+
+  // BB情報の展開
+  const { minX, minY, width: bbW, height: bbH } = bbInfo || { minX: 0, minY: 0, width: width, height: height };
 
   // --- 1. WGSLロード ---
   const initWgsl = await loadWGSL('./shaders/jfa_init.wgsl');
@@ -23,19 +26,22 @@ export async function runJumpFloodingWebGPU(width, height, labels) {
   };
 
   const numPixels = width * height;
-  const workgroups = [Math.ceil(width / 16), Math.ceil(height / 16), 1];
+  // WorkgroupはBBサイズに合わせる
+  const workgroups = [Math.ceil(bbW / 16), Math.ceil(bbH / 16), 1];
 
   // --- 3. バッファ作成 ---
-  // Params: [width, height, step_size, padding]
-  const paramsArray = new Float32Array([width, height, 0, 0]);
+  // Params: [width, height, step_size, padding, minX, minY, 0, 0]
+  // 配列サイズを8 (32bytes) に拡張して minX, minY を格納
+  const paramsArray = new Float32Array([
+    width, height, 0, 0,
+    minX, minY, 0, 0
+  ]);
   const paramsBuffer = createBuffer(device, paramsArray, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
 
   // Input Labels
   const labelInputBuffer = createBuffer(device, new Uint32Array(labels), GPUBufferUsage.STORAGE);
 
   // JFA Ping-Pong Buffers
-  // 各ピクセル: struct { seed_x: i32, seed_y: i32, label: u32, padding: u32 }
-  // Int32Array (4 elements per pixel)
   const jfaBufferA = createBuffer(device, new Int32Array(numPixels * 4), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
   const jfaBufferB = createBuffer(device, new Int32Array(numPixels * 4), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
 
@@ -44,64 +50,43 @@ export async function runJumpFloodingWebGPU(width, height, labels) {
   const distanceBuffer = createBuffer(device, new Int32Array(numPixels), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
 
   // --- 4. BindGroups作成 ---
-  // Init
   const bgInit = createBindGroupWithBindings(device, pipelines.init, {
-    0: paramsBuffer,
-    1: labelInputBuffer,
-    2: jfaBufferA // Init結果をAに書き込む
+    0: paramsBuffer, 1: labelInputBuffer, 2: jfaBufferA
   });
 
-  // Step BindGroups (Ping-Pong)
-  // A -> B
   const bgStepAB = createBindGroupWithBindings(device, pipelines.step, {
-    0: paramsBuffer,
-    1: jfaBufferA, // Read
-    2: jfaBufferB  // Write
+    0: paramsBuffer, 1: jfaBufferA, 2: jfaBufferB
   });
-  // B -> A
   const bgStepBA = createBindGroupWithBindings(device, pipelines.step, {
-    0: paramsBuffer,
-    1: jfaBufferB, // Read
-    2: jfaBufferA  // Write
+    0: paramsBuffer, 1: jfaBufferB, 2: jfaBufferA
   });
 
-  // Finalize BindGroups
-  // 最終結果がAにある場合
   const bgFinalA = createBindGroupWithBindings(device, pipelines.final, {
-    0: paramsBuffer,
-    1: jfaBufferA,       // Input Seed Map
-    2: nearestLabelBuffer,
-    3: distanceBuffer
+    0: paramsBuffer, 1: jfaBufferA, 2: nearestLabelBuffer, 3: distanceBuffer
   });
-  // 最終結果がBにある場合
   const bgFinalB = createBindGroupWithBindings(device, pipelines.final, {
-    0: paramsBuffer,
-    1: jfaBufferB,
-    2: nearestLabelBuffer,
-    3: distanceBuffer
+    0: paramsBuffer, 1: jfaBufferB, 2: nearestLabelBuffer, 3: distanceBuffer
   });
-
 
   // --- 5. 実行 ---
   console.log("JFA: Initializing...");
   runKernel(device, [pipelines.init], [bgInit], [workgroups]);
 
   // JFA Loop
-  // ステップサイズ: N/2, N/4, ..., 1
-  const maxDim = Math.max(width, height);
-  // 2の累乗に合わせる場合の開始ステップ数計算
-  // 例: 500px -> nextPoT=512 -> start=256
+  // ステップサイズ計算: BBの最大辺に基づく
+  const maxDim = Math.max(bbW, bbH);
+
+  // maxDimに最も近い2の累乗の半分から開始
   let stepSize = 1 << (Math.ceil(Math.log2(maxDim)) - 1);
-  // 画像サイズより大きいステップは不要なので調整
   if (stepSize >= maxDim) stepSize /= 2;
 
-  let currentBufferIsA = true; // 現在の有効なデータが入っているバッファ
+  let currentBufferIsA = true;
 
-  console.log(`JFA: Starting loop (max_step=${stepSize})...`);
+  console.log(`JFA: Starting loop (max_step=${stepSize} for BB=${bbW}x${bbH})...`);
 
   while (stepSize >= 1) {
-    // Uniform更新 (Step Size)
-    device.queue.writeBuffer(paramsBuffer, 8, new Float32Array([stepSize])); // offset 8 bytes (3rd float)
+    // Uniform更新 (Step Size) - offset 8 bytes (index 2)
+    device.queue.writeBuffer(paramsBuffer, 8, new Float32Array([stepSize]));
 
     if (currentBufferIsA) {
       runKernel(device, [pipelines.step], [bgStepAB], [workgroups]);
@@ -109,12 +94,11 @@ export async function runJumpFloodingWebGPU(width, height, labels) {
       runKernel(device, [pipelines.step], [bgStepBA], [workgroups]);
     }
 
-    // Swap and Halve
     currentBufferIsA = !currentBufferIsA;
     stepSize /= 2;
   }
 
-  // --- 6. 最終変換 (Seed Map -> Label & Distance) ---
+  // --- 6. 最終変換 ---
   console.log("JFA: Finalizing...");
   const finalBg = currentBufferIsA ? bgFinalA : bgFinalB;
   runKernel(device, [pipelines.final], [finalBg], [workgroups]);
@@ -123,10 +107,8 @@ export async function runJumpFloodingWebGPU(width, height, labels) {
   const labelResult32 = await readBuffer(device, nearestLabelBuffer, Uint32Array, numPixels);
   const distResult = await readBuffer(device, distanceBuffer, Int32Array, numPixels);
 
-  const labelResult8 = new Uint8Array(labelResult32);
-
   return {
-    nearestLabelMap: labelResult8,
+    nearestLabelMap: new Uint8Array(labelResult32),
     distanceMap: distResult
   };
 }
