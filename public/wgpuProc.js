@@ -65,11 +65,11 @@ export async function imageProc(rgbaFlat, width, height) {
   ];
 
   const workgroups = [
-    [Math.ceil(pixelCount / 256), 1, 1],
     [Math.ceil(width / 16), Math.ceil(height / 16), 1],
     [Math.ceil(width / 16), Math.ceil(height / 16), 1],
-    [Math.ceil(pixelCount / 256), 1, 1],
-    [Math.ceil(pixelCount / 64), 1, 1],
+    [Math.ceil(width / 16), Math.ceil(height / 16), 1],
+    [Math.ceil(width / 16), Math.ceil(height / 16), 1],
+    [Math.ceil(width / 16), Math.ceil(height / 16), 1],
   ];
   await runKernel(device, pipelines, bindGroups, workgroups);
 

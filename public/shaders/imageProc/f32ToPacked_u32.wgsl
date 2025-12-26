@@ -11,12 +11,16 @@ fn luma_to_u8(l: f32) -> u32 {
   return rounded;
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let i = gid.x;
-  if (i >= params.length) {
+  let x = gid.x;
+  let y = gid.y;
+
+  if (x >= params.width || y >= params.height) {
     return;
   }
+
+  let i = y * params.width + x;
 
   let l = inputLuma[i];
   let v = luma_to_u8(l);

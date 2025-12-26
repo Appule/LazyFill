@@ -16,9 +16,9 @@ class AppState {
     this.markerBuffer = null;    // Int32Array
     this.latestSegmentation = null; // Uint8Array or similar
     this.labels = {
-      0: { r: 0, g: 0, b: 0, a: 0.0, hex: '#000000' },      // Eraser (Alpha 0)
-      1: { r: 0, g: 0, b: 255, a: 1.0, hex: '#0000ff' },    // BG
-      2: { r: 255, g: 0, b: 0, a: 1.0, hex: '#ff0000' }     // Default Object
+      0: { r: 0, g: 0, b: 0, a: 0.0, hex: '#000000' },
+      1: { r: 0, g: 0, b: 255, a: 1.0, hex: '#0000ff' },
+      2: { r: 128, g: 128, b: 128, a: 1.0, hex: '#808080' }
     };
     this.labelPixelCounts = {};
     this.isMarkerDirty = false;
@@ -124,7 +124,6 @@ class AppView {
       // Top Bar
       inpZoomLevel: document.getElementById('inpZoomLevel'),
       btnRun: document.getElementById('btnRun'),
-      chkDynamic: document.getElementById('chkDynamic'),
       btnDownloadImg: document.getElementById('btnDownloadImg'),
       chkTransparent: document.getElementById('chkTransparent'),
       btnDownloadMask: document.getElementById('btnDownloadMask'),
@@ -146,7 +145,10 @@ class AppView {
       brushGuide: document.getElementById('brushGuide'),
       toolRadios: document.querySelectorAll('input[name="toolMode"]'),
       dispBrush: document.getElementById('dispBrushSize'),
+      chkDynamic: document.getElementById('chkDynamic'),
       chkShowMarker: document.getElementById('chkShowMarker'),
+      btnAutoMark: document.getElementById('btnAutoMark'),
+      spinner: document.getElementById('loadingSpinner'),
       palette: document.getElementById('paletteContainer'),
       colorPicker: document.getElementById('colorPicker'),
       alphaInput: document.getElementById('alphaInput'),
@@ -225,6 +227,13 @@ class AppView {
       this.els.panelParams.classList.toggle('hidden');
     });
 
+    this.els.chkTransparent.addEventListener('change', () => {
+      // 計算結果が存在する場合のみ再描画
+      if (this.state.latestSegmentation) {
+        this.drawResult(this.state.latestSegmentation);
+      }
+    });
+
     // --- Tools & Palette Actions ---
     // --- Tool Switching ---
     this.els.toolRadios.forEach(radio => {
@@ -237,15 +246,10 @@ class AppView {
       });
     });
 
-    // --- Marker Visibility & Auto Run Logic ---
-    this.els.chkShowMarker.addEventListener('change', (e) => {
-      const isVisible = e.target.checked;
-      this.updateLayerVisibility();
+    this.els.chkShowMarker.addEventListener('change', () => this.updateLayerVisibility());
 
-      // 変更があった場合(isMarkerDirty)のみ実行する
-      if (!isVisible && this.getParameters().isDynamic && this.state.isMarkerDirty) {
-        this.handlers.onRun();
-      }
+    this.els.btnAutoMark.addEventListener('click', () => {
+      this.handlers.onAutoMark();
     });
 
     // --- Buttons ---
@@ -359,6 +363,13 @@ class AppView {
     });
 
     vp.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  setLoading(isLoading) {
+    this.els.spinner.style.display = isLoading ? 'block' : 'none';
+    // ボタンの連打防止
+    this.els.btnAutoMark.disabled = isLoading;
+    this.els.btnRun.disabled = isLoading;
   }
 
   setToolMode(mode) {
@@ -599,23 +610,22 @@ class AppView {
   }
 
   updateLayerVisibility() {
-    const isMarkerVisible = this.els.chkShowMarker.checked;
+    const showMarker = this.els.chkShowMarker.checked;
 
-    // 1. マーカーキャンバスの制御
-    // CSS opacityで制御 (1:見える, 0:見えない)
-    this.els.canvases.marker.style.opacity = isMarkerVisible ? '1' : '0';
-
-    // 2. マスク(Output)キャンバスの制御
-    // マーカーが表示されているなら、マスクは隠す
-    // マーカーが隠されているなら、マスクを表示する(ただし結果がある場合のみ)
-    if (isMarkerVisible) {
-      this.els.canvases.output.style.visibility = 'hidden';
+    // 1. マーカーレイヤー (canvasMarker) の制御
+    if (showMarker) {
+      this.els.canvases.marker.style.opacity = '1.0';
     } else {
-      // 結果データが存在するかチェック (State経由またはvisibilityチェック)
-      // ここでは簡易的に「データがあれば表示」としたいが、ViewはStateを直接持っているので確認
-      if (this.state.latestSegmentation) {
-        this.els.canvases.output.style.visibility = 'visible';
-      }
+      // マーカーOFF -> 完全透明 (0)
+      this.els.canvases.marker.style.opacity = '0';
+    }
+
+    // 2. マスクレイヤー (canvasOutput) の制御
+    // 結果がある場合のみ表示
+    if (this.state.latestSegmentation) {
+      this.els.canvases.output.style.visibility = 'visible';
+    } else {
+      this.els.canvases.output.style.visibility = 'hidden';
     }
   }
 
@@ -664,28 +674,42 @@ class AppView {
   }
 
   drawResult(resultLabelMap) {
-    const { width, height, inputData } = this.state; // inputData取得
+    const { width, height, inputData } = this.state;
     const ctx = this.els.ctx.output;
     const imgData = ctx.createImageData(width, height);
     const d = imgData.data;
 
-    // ... (ピクセルデータの構築ループは変更なし) ...
+    // 【追加】現在の「背景透過」設定を取得
+    const isTransparent = this.els.chkTransparent.checked;
+
     for (let i = 0; i < width * height; i++) {
       const labelId = resultLabelMap[i];
+      const lum = inputData[i * 4];
+
       if (labelId >= 2) {
+        // 前景（オブジェクト）: 乗算合成
         const c = this.state.getColor(labelId);
-        const lum = inputData[i * 4];
         d[i * 4 + 0] = Math.floor(lum * (c.r / 255));
         d[i * 4 + 1] = Math.floor(lum * (c.g / 255));
         d[i * 4 + 2] = Math.floor(lum * (c.b / 255));
         d[i * 4 + 3] = 255;
       } else {
-        d[i * 4 + 3] = 0;
+        // 背景: 設定に応じて分岐
+        if (isTransparent) {
+          d[i * 4 + 0] = 0;
+          d[i * 4 + 1] = 0;
+          d[i * 4 + 2] = 0;
+          d[i * 4 + 3] = 255 - lum;
+        } else {
+          d[i * 4 + 0] = lum;
+          d[i * 4 + 1] = lum;
+          d[i * 4 + 2] = lum;
+          d[i * 4 + 3] = 255;
+        }
       }
     }
 
     ctx.putImageData(imgData, 0, 0);
-
     this.updateLayerVisibility();
   }
   
@@ -711,31 +735,106 @@ class AppView {
 // 3. SERVICE
 // ==========================================
 const GraphCutService = {
+  async execAutoMark(state, bbThreshold, padding) {
+    if (!state.isImageLoaded) return;
+
+    // エッジデータの準備 (重い処理なので非同期)
+    const imageProcResult = await imageProc(state.inputData, state.width, state.height);
+    const normalizedR = extractNormalizedR(imageProcResult);
+
+    const { width, height, markerBuffer } = state;
+    const numPixels = width * height;
+    const targetId = 2; // グレーのオブジェクトID固定
+
+    // バウンディングボックス計算
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+    let hasContent = false;
+
+    // normalizedRを走査して全体BBを求める
+    for (let i = 0; i < numPixels; i++) {
+      if (normalizedR[i] > bbThreshold) {
+        const x = i % width;
+        const y = Math.floor(i / width);
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+        hasContent = true;
+      }
+    }
+
+    if (!hasContent) return; // 線が見つからなければ終了
+
+    // Padding適用
+    const pMinX = Math.max(0, minX - padding);
+    const pMaxX = Math.min(width - 1, maxX + padding);
+    const pMinY = Math.max(0, minY - padding);
+    const pMaxY = Math.min(height - 1, maxY + padding);
+
+    // 4方向スキャンで markerBuffer に書き込み
+    // ※ 既にマーカーがある場所(markerBuffer[idx] !== 0)は上書きしない
+
+    const writeMarker = (idx) => {
+      if (markerBuffer[idx] === 0) {
+        markerBuffer[idx] = targetId;
+        state.updatePixelCount(targetId, 1);
+      }
+    };
+
+    // (1) Top -> Bottom
+    for (let x = pMinX; x <= pMaxX; x++) {
+      let hitLine = false;
+      for (let y = pMinY; y <= pMaxY; y++) {
+        const idx = y * width + x;
+        if (normalizedR[idx] > bbThreshold) hitLine = true;
+        else if (hitLine) { writeMarker(idx); break; }
+      }
+    }
+    // (2) Bottom -> Top
+    for (let x = pMinX; x <= pMaxX; x++) {
+      let hitLine = false;
+      for (let y = pMaxY; y >= pMinY; y--) {
+        const idx = y * width + x;
+        if (normalizedR[idx] > bbThreshold) hitLine = true;
+        else if (hitLine) { writeMarker(idx); break; }
+      }
+    }
+    // (3) Left -> Right
+    for (let y = pMinY; y <= pMaxY; y++) {
+      let hitLine = false;
+      for (let x = pMinX; x <= pMaxX; x++) {
+        const idx = y * width + x;
+        if (normalizedR[idx] > bbThreshold) hitLine = true;
+        else if (hitLine) { writeMarker(idx); break; }
+      }
+    }
+    // (4) Right -> Left
+    for (let y = pMinY; y <= pMaxY; y++) {
+      let hitLine = false;
+      for (let x = pMaxX; x >= pMinX; x--) {
+        const idx = y * width + x;
+        if (normalizedR[idx] > bbThreshold) hitLine = true;
+        else if (hitLine) { writeMarker(idx); break; }
+      }
+    }
+  },
+  
   async run(state, params) {
     if (!state.isImageLoaded) return;
 
-    // 1. Preprocess Image
     const imageProcResult = await imageProc(state.inputData, state.width, state.height);
     const normalizedR = extractNormalizedR(imageProcResult);
     const { width, height } = state;
     const numPixels = width * height;
 
-    // 2. Identify Objects (Labels >= 2)
-    const objectIds = Object.keys(state.labels).map(Number).filter(id => id >= 2).sort((a, b) => b - a);
+    const objectIds = Object.keys(state.labels)
+      .map(Number)
+      .filter(id => id >= 2)
+      .sort((a, b) => b - a);
 
-    // Result Buffer (Initialize with 0)
     const finalLabelMap = new Uint8Array(numPixels).fill(0);
 
-    // ---------------------------------------------
-    // Multi-Label Loop: One-vs-Rest for each Object
-    // ---------------------------------------------
-    if (objectIds.length === 0) {
-      console.log("No object labels defined.");
-      return null;
-    }
+    if (objectIds.length === 0) return null;
 
-    // Calculate BBox of visual features (for padding)
-    // Note: Using BBThreshold on normalizedR to guess object extents
+    // 1. 全体のBB計算
     let minX = width, minY = height, maxX = 0, maxY = 0;
     let hasContent = false;
     for (let i = 0; i < numPixels; i++) {
@@ -748,84 +847,69 @@ const GraphCutService = {
       }
     }
 
+    // 何も描画範囲がない場合、処理しない
+    if (!hasContent) return finalLabelMap;
+
+    // パディング適用後のBB (計算領域)
+    const pad = params.padding;
+    const pMinX = Math.max(0, minX - pad);
+    const pMaxX = Math.min(width - 1, maxX + pad);
+    const pMinY = Math.max(0, minY - pad);
+    const pMaxY = Math.min(height - 1, maxY + pad);
+
+    // BBの幅と高さ
+    const bbWidth = pMaxX - pMinX + 1;
+    const bbHeight = pMaxY - pMinY + 1;
+
+    // 【追加】BB情報をまとめる
+    const bbInfo = { minX: pMinX, minY: pMinY, width: bbWidth, height: bbHeight };
+
     for (const targetId of objectIds) {
       const count = state.labelPixelCounts[targetId] || 0;
-      if (count <= 0) {
-        console.log(`Skipping Obj ${targetId} (No markers)`);
-        continue;
-      }
+      // (注: 前回の自動マークボタン化により、ここはcountチェックのみに戻しています)
+      if (count <= 0) continue;
 
-      console.log(`Processing Obj ${targetId}`);
-
-      // A. Create Temporary Marker Buffer for Binary Cut
-      // Target(2) vs Background(1)
-      // - User's Target ID -> 2 (Source)
-      // - User's Other IDs -> 1 (Sink)
-      // - User's BG (1) -> 1 (Sink)
-      // - Padding Area -> 1 (Sink) [If not marked by user]
-
+      console.log(`Processing Obj ${targetId} (Size: ${bbWidth}x${bbHeight})`);
       const tempMarker = new Int32Array(numPixels);
 
       for (let i = 0; i < numPixels; i++) {
         const uid = state.markerBuffer[i];
-        if (uid === targetId) {
-          tempMarker[i] = 2; // Source
-        } else if (uid !== 0) {
-          tempMarker[i] = 1; // Sink (Explicit BG or Other Objects)
-        } else {
-          tempMarker[i] = 0; // Unknown
-        }
+        if (uid === targetId) tempMarker[i] = 2;
+        else if (uid !== 0) tempMarker[i] = 1;
+        else tempMarker[i] = 0;
       }
 
-      // B. Apply Auto Padding (Set implicit Sink around BBox)
-      if (hasContent) {
-        const pad = params.padding;
-        // Fill outside of [minX-pad, maxX+pad] x [minY-pad, maxY+pad] with Sink(1)
-        // ONLY if user hasn't marked it (tempMarker[i] == 0)
-        const pMinX = Math.max(0, minX - pad);
-        const pMaxX = Math.min(width - 1, maxX + pad);
-        const pMinY = Math.max(0, minY - pad);
-        const pMaxY = Math.min(height - 1, maxY + pad);
-
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            if (x < pMinX || x > pMaxX || y < pMinY || y > pMaxY) {
-              const idx = y * width + x;
-              if (tempMarker[idx] === 0) {
-                tempMarker[idx] = 1; // Implicit Sink
-              }
-            }
+      // BB外周にSink設置 (BB内だけ計算すればよくなる)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (x < pMinX || x > pMaxX || y < pMinY || y > pMaxY) {
+            const idx = y * width + x;
+            if (tempMarker[idx] === 0) tempMarker[idx] = 1;
           }
         }
       }
 
-      // C. JFA (Binary)
-      const { distanceMap } = await runJumpFloodingWebGPU(width, height, tempMarker);
+      // 【変更】JFAにBB情報を渡す
+      const { distanceMap } = await runJumpFloodingWebGPU(width, height, tempMarker, bbInfo);
 
-      // D. Push-Relabel (Binary)
       const bfsFreq = params.bfsNum > 0 ? Math.floor(params.maxIter / params.bfsNum) : params.maxIter;
+
+      // 【変更】PushRelabelにBB情報を渡す
       const prResult = await runPushRelabelWebGPU(
         width, height, normalizedR, tempMarker, distanceMap,
-        {
-          strength: params.strength,
-          sigma: params.sigma,
-          maxIter: params.maxIter,
-          bfsFreq: bfsFreq
-        }
+        { strength: params.strength, sigma: params.sigma, maxIter: params.maxIter, bfsFreq: bfsFreq },
+        bbInfo // 追加引数
       );
 
-      // E. Merge Result
-      // If segmented as Foreground (1), assign targetId to final map
-      const seg = prResult.segmentation; // 0 or 1
+      const seg = prResult.segmentation;
+
+      // 結果のマージ (BB内のみ見れば少し速いが、JS側は単純なループのままで十分)
       for (let i = 0; i < numPixels; i++) {
-        if (seg[i] === 1) {
-          finalLabelMap[i] = targetId;
-        }
+        if (seg[i] === 1) finalLabelMap[i] = targetId;
       }
     }
 
     state.latestSegmentation = finalLabelMap;
-    
     return finalLabelMap;
   }
 };
@@ -859,6 +943,24 @@ export async function main() {
         });
       };
       img.src = URL.createObjectURL(file);
+    },
+
+    onAutoMark: async () => {
+      if (!state.isImageLoaded) return;
+
+      try {
+        const params = view.getParameters();
+        await GraphCutService.execAutoMark(state, params.bbThreshold, params.padding);
+        state.isMarkerDirty = true;
+
+        // if chk dynamic, auto run
+        if (params.isDynamic) handlers.onRun();
+
+        view.redrawMarkerCanvas();
+      } catch (e) {
+        console.error(e);
+        alert("Auto Mark Error: " + e.message);
+      }
     },
 
     onLabelSelect: (id) => { state.currentLabelId = id; view.updatePaletteUI(); view.setToolMode('brush'); },
@@ -962,11 +1064,27 @@ export async function main() {
 
     onRun: async () => {
       const params = view.getParameters();
-      const resultMap = await GraphCutService.run(state, params);
-      if (resultMap) {
-        view.drawResult(resultMap);
-        view.updateDownloadButtons(true);
-        state.isMarkerDirty = false;
+
+      // 【追加】計算実行中にスピナーを表示
+      view.setLoading(true);
+
+      // UI更新のための待機
+      await new Promise(r => setTimeout(r, 10));
+
+      try {
+        const resultMap = await GraphCutService.run(state, params);
+
+        if (resultMap) {
+          view.drawResult(resultMap);
+          view.updateDownloadButtons(true);
+          state.isMarkerDirty = false;
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Run Error: " + e.message);
+      } finally {
+        // 【追加】計算終了後にスピナーを非表示
+        view.setLoading(false);
       }
     },
 
@@ -988,13 +1106,11 @@ export async function main() {
           } else {
             // 背景: チェックボックスに応じて分岐
             if (isTransparent) {
-              // 透過
               data[i * 4 + 0] = 0;
               data[i * 4 + 1] = 0;
               data[i * 4 + 2] = 0;
               data[i * 4 + 3] = 255 - luminance;
             } else {
-              // 白背景
               data[i * 4 + 0] = luminance;
               data[i * 4 + 1] = luminance;
               data[i * 4 + 2] = luminance;
