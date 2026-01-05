@@ -6,20 +6,31 @@ import { GraphCutService } from './components/GraphCutService.js';
 export async function main() {
   const state = new AppState();
 
+  // Electron関連の取得
+  let ipcRenderer = null;
+  let fs = null;
+  let path = null;
+
+  if (window.require) {
+    try {
+      const electron = window.require('electron');
+      ipcRenderer = electron.ipcRenderer;
+      fs = window.require('fs');      // ファイル読み込み用
+      path = window.require('path');  // パス解析用
+    } catch (e) {
+      console.warn("Electron modules not found");
+    }
+  }
+
   const handlers = {
     onFileLoad: (file) => {
       if (!file) return;
 
       // --- パス取得ロジック ---
       let filePath = null;
-
-      // 1. 単純なプロパティ参照 (Electronのバージョンによってはこれで取れる)
       if (file.path) {
         filePath = file.path;
       }
-
-      // 2. Electron webUtils API (確実な方法)
-      // contextIsolation: false, nodeIntegration: true の環境で動作します
       if (!filePath && window.require) {
         try {
           const { webUtils } = window.require('electron');
@@ -29,7 +40,7 @@ export async function main() {
         }
       }
 
-      console.log("Detected File Path:", filePath); // デバッグ用: パスが取れているか確認
+      console.log("Detected File Path:", filePath);
 
       if (view.els.dropMessage) {
         view.els.dropMessage.style.display = 'none';
@@ -40,7 +51,7 @@ export async function main() {
         view.resizeCanvases(img.width, img.height);
         getImageDataFromFileInput({ files: [file] }).then(res => {
           convertToGrayscale(res.data);
-          state.reset(img.width, img.height, res.data, filePath); // 取得したパスを渡す
+          state.reset(img.width, img.height, res.data, filePath);
 
           const ctx = view.els.ctx.input;
           const idata = ctx.createImageData(img.width, img.height);
@@ -48,7 +59,7 @@ export async function main() {
           ctx.putImageData(idata, 0, 0);
 
           view.updatePaletteUI();
-          view.updateDownloadButtons(false);
+          // 【削除】ボタン非活性化の呼び出しを削除
           view.updateLayerVisibility();
           view.redrawMarkers();
         });
@@ -85,7 +96,14 @@ export async function main() {
     },
 
     onToggleMarker: () => view.updateLayerVisibility(),
-    onToggleTransparent: () => { if (state.latestSegmentation) view.drawResult(state.latestSegmentation); },
+
+    // 【修正】透過切替: DOMではなくViewの状態変数を更新
+    onToggleTransparent: (forceValue = null) => {
+      if (forceValue !== null) {
+        view.isTransparent = forceValue;
+      }
+      if (state.latestSegmentation) view.drawResult(state.latestSegmentation);
+    },
 
     onClearMarkers: () => {
       state.markerBuffer.fill(0);
@@ -162,7 +180,7 @@ export async function main() {
         if (resultMap) {
           state.latestSegmentation = resultMap;
           view.drawResult(resultMap);
-          view.updateDownloadButtons(true);
+          // 【削除】ボタン活性化の呼び出しを削除
           state.isMarkerDirty = false;
         }
       } catch (e) {
@@ -176,7 +194,9 @@ export async function main() {
     onDownloadImage: () => {
       if (!state.latestSegmentation) return;
       const { width, height, inputData, latestSegmentation } = state;
-      const isTransparent = view.els.chkTransparent.checked;
+      // 【修正】DOMではなくViewの状態変数を参照
+      const isTransparent = view.isTransparent;
+
       downloadBufferAsImage(width, height, (data) => {
         for (let i = 0; i < width * height; i++) {
           const labelId = latestSegmentation[i];
@@ -322,7 +342,6 @@ export async function main() {
             });
           };
 
-          // --- メインフロー ---
           if (json.imagePath) {
             try {
               const img = await loadImage(json.imagePath);
@@ -362,10 +381,59 @@ export async function main() {
         }
       };
       reader.readAsText(file);
+    },
+
+    onMenuToggleSettings: (isVisible) => {
+      if (isVisible) {
+        view.els.panelParams.classList.remove('hidden');
+      } else {
+        view.els.panelParams.classList.add('hidden');
+      }
     }
   };
 
   const view = new AppView(state, handlers);
+
+  if (ipcRenderer) {
+    ipcRenderer.on('menu-open-file', (event, filePath) => {
+      if (!fs || !path) return;
+
+      try {
+        const buffer = fs.readFileSync(filePath);
+        const fileName = path.basename(filePath);
+        const mimeType = fileName.endsWith('.json') ? 'application/json' : 'image/png';
+
+        const file = new File([buffer], fileName, { type: mimeType });
+        Object.defineProperty(file, 'path', { value: filePath });
+
+        if (fileName.toLowerCase().endsWith('.json')) {
+          handlers.onLoadProject(file);
+        } else {
+          handlers.onFileLoad(file);
+        }
+
+      } catch (err) {
+        console.error("File open error:", err);
+        alert("ファイルを開けませんでした: " + err.message);
+      }
+    });
+
+    ipcRenderer.on('menu-save-project', () => handlers.onSaveProject());
+    ipcRenderer.on('menu-export-image', () => handlers.onDownloadImage());
+    ipcRenderer.on('menu-export-mask', () => handlers.onDownloadMask());
+    ipcRenderer.on('menu-toggle-transparent', (event, isChecked) => {
+      handlers.onToggleTransparent(isChecked);
+    });
+    ipcRenderer.on('menu-clear-markers', () => {
+      if (confirm("Clear all markers?")) {
+        handlers.onClearMarkers();
+        handlers.onRun();
+      }
+    });
+    ipcRenderer.on('menu-toggle-settings', (event, isChecked) => {
+      handlers.onMenuToggleSettings(isChecked);
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', main);

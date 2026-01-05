@@ -124,25 +124,55 @@ canvas {
   flex-wrap: wrap;
 }
 
-#panel-top h1 {
-  margin: 0;
-  font-size: 1.5rem;
-  margin-right: auto;
-  color: var(--color-primary);
+/* --- Top Bar (Run, DL, Toggles) --- */
+/* トップパネルは不要になったので削除、または非表示にします */
+#panel-top {
+  display: none;
 }
 
 /* --- Tool Palette (Right Side) --- */
 #panel-tools {
-  top: 100px;
+  top: 20px;
+  /* 上に詰める */
   right: 20px;
   width: 320px;
+
+  /* 【追加】画面からはみ出さないようにスクロール設定 */
+  max-height: calc(100vh - 40px);
+  /* 上下マージン分引く */
+  overflow-y: auto;
+  /* 内容が多い場合はスクロール */
+  display: flex;
+  flex-direction: column;
 }
 
-/* --- Parameters (Left Side, Hidden by default) --- */
+/* --- Parameters (Left Side) --- */
 #panel-params {
-  top: 100px;
+  top: 20px;
+  /* 上に詰める */
   left: 20px;
   width: 300px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+/* スクロールバーのデザイン（オプション：モダンに見せる） */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .hidden {

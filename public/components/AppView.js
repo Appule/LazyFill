@@ -11,21 +11,19 @@ export class AppView {
     this.lastMousePos = { x: 0, y: 0 };
     this.drawing = false;
 
+    // 【追加】背景透過の状態を内部で保持 (DOM要素削除のため)
+    this.isTransparent = false;
+
     // DOM要素の参照
     this.els = {
       viewport: document.getElementById('viewport'),
       canvasContainer: document.getElementById('canvasContainer'),
       dropMessage: document.getElementById('drop-message'),
 
-      btnSave: document.getElementById('btnSave'),
-      btnLoad: document.getElementById('btnLoad'),
+      // ファイルメニューからクリックするための隠しinput
       inpLoad: document.getElementById('inpLoad'),
-      inpZoomLevel: document.getElementById('inpZoomLevel'),
-      btnRun: document.getElementById('btnRun'),
-      btnDownloadImg: document.getElementById('btnDownloadImg'),
-      chkTransparent: document.getElementById('chkTransparent'),
-      btnDownloadMask: document.getElementById('btnDownloadMask'),
-      btnToggleParams: document.getElementById('btnToggleParams'),
+
+      // パラメータパネル
       panelParams: document.getElementById('panel-params'),
 
       inputs: {
@@ -95,7 +93,9 @@ export class AppView {
     const { width, height, labels, inputData } = this.state;
     const imgData = this.els.ctx.output.createImageData(width, height);
     const data = imgData.data;
-    const isTransparent = this.els.chkTransparent.checked;
+
+    // 【修正】DOMではなく内部プロパティを参照
+    const isTransparent = this.isTransparent;
 
     for (let i = 0; i < width * height; i++) {
       const idx = i * 4;
@@ -169,15 +169,9 @@ export class AppView {
     this.els.btnDeleteLabel.disabled = (currId === 1);
   }
 
-  updateDownloadButtons(hasResult) {
-    this.els.btnDownloadImg.disabled = !hasResult;
-    this.els.btnDownloadMask.disabled = !hasResult;
-  }
-
   setLoading(isLoading) {
     this.els.spinner.style.display = isLoading ? 'block' : 'none';
     this.els.btnAutoMark.disabled = isLoading;
-    this.els.btnRun.disabled = isLoading;
   }
 
   getParameters() {
@@ -242,9 +236,6 @@ export class AppView {
   updateTransform() {
     const { x, y, scale } = this.transform;
     this.els.canvasContainer.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-    if (document.activeElement !== this.els.inpZoomLevel) {
-      this.els.inpZoomLevel.value = Math.round(scale * 100);
-    }
   }
 
   handleZoom(e) {
@@ -322,26 +313,8 @@ export class AppView {
       }
     });
 
-    // Buttons
-    this.els.btnSave.addEventListener('click', () => this.handlers.onSaveProject());
-    this.els.btnLoad.addEventListener('click', () => document.getElementById('inpLoad').click());
+    // --- Buttons ---
     this.els.inpLoad.addEventListener('change', e => this.handlers.onLoadProject(e.target.files[0]));
-
-    this.els.inpZoomLevel.addEventListener('change', e => {
-      let p = parseFloat(e.target.value);
-      if (isNaN(p) || p <= 0) p = 100;
-      this.setZoomManual(p / 100.0);
-    });
-
-    this.els.btnRun.addEventListener('click', () => this.handlers.onRun());
-    this.els.btnDownloadImg.addEventListener('click', () => this.handlers.onDownloadImage());
-    this.els.btnDownloadMask.addEventListener('click', () => this.handlers.onDownloadMask());
-
-    // 【設定パネルの表示切替】
-    this.els.btnToggleParams.addEventListener('click', () => {
-      // style.cssの.hidden定義が必要です
-      this.els.panelParams.classList.toggle('hidden');
-    });
 
     this.els.btnAutoMark.addEventListener('click', () => this.handlers.onAutoMark());
 
@@ -352,7 +325,6 @@ export class AppView {
     });
 
     this.els.chkShowMarker.addEventListener('change', () => this.handlers.onToggleMarker());
-    this.els.chkTransparent.addEventListener('change', () => this.handlers.onToggleTransparent());
 
     this.els.btnAddLabel.addEventListener('click', () => this.handlers.onAddLabel());
     this.els.btnDeleteLabel.addEventListener('click', () => this.handlers.onDeleteLabel());

@@ -26,9 +26,7 @@
   <div id="panel-top" class="panel">
     <h1>LazyFill</h1>
 
-    <button id="btnSave">プロジェクトを保存</button>
     <input type="file" id="inpLoad" style="display:none" accept=".json">
-    <button id="btnLoad">プロジェクト読み込み</button>
 
     <div
       style="display: flex; align-items: center; margin-right: 15px; background: rgba(0,0,0,0.05); padding: 5px 10px; border-radius: 4px;">
@@ -39,20 +37,7 @@
     </div>
 
     <button id="btnRun" class="btn-primary">▶ 塗りつぶし実行</button>
-    
-    <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-left: 10px;">
-      <div style="display: flex; gap: 5px;">
-        <button id="btnDownloadImg" class="btn-secondary" disabled>⇩ 画像保存</button>
-        <label style="margin: 0 10px; cursor: pointer; user-select: none;">
-          <input type="checkbox" id="chkTransparent"> 背景透過
-        </label>
-        <button id="btnDownloadMask" class="btn-secondary" disabled>⇩ マスク保存</button>
-      </div>
-    </div>
-
-    <div style="width: 1px; height: 30px; background: #ddd; margin: 0 10px;"></div>
-
-    <button id="btnToggleParams" class="btn-secondary">⚙️ 詳細設定</button>
+    <input type="checkbox" id="chkTransparent"> 背景透過
   </div>
 
   <div id="panel-params" class="panel hidden">
