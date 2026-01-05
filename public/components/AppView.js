@@ -11,19 +11,13 @@ export class AppView {
     this.lastMousePos = { x: 0, y: 0 };
     this.drawing = false;
 
-    // 【追加】背景透過の状態を内部で保持 (DOM要素削除のため)
     this.isTransparent = false;
 
-    // DOM要素の参照
     this.els = {
       viewport: document.getElementById('viewport'),
       canvasContainer: document.getElementById('canvasContainer'),
       dropMessage: document.getElementById('drop-message'),
-
-      // ファイルメニューからクリックするための隠しinput
       inpLoad: document.getElementById('inpLoad'),
-
-      // パラメータパネル
       panelParams: document.getElementById('panel-params'),
 
       inputs: {
@@ -41,6 +35,10 @@ export class AppView {
       dispBrush: document.getElementById('dispBrushSize'),
       chkDynamic: document.getElementById('chkDynamic'),
       chkShowMarker: document.getElementById('chkShowMarker'),
+
+      // 【追加】Runボタン
+      btnRun: document.getElementById('btnRun'),
+
       btnAutoMark: document.getElementById('btnAutoMark'),
       spinner: document.getElementById('loadingSpinner'),
       palette: document.getElementById('paletteContainer'),
@@ -49,7 +47,8 @@ export class AppView {
       currentLabelName: document.getElementById('currentLabelName'),
       btnAddLabel: document.getElementById('btnAddLabel'),
       btnDeleteLabel: document.getElementById('btnDeleteLabel'),
-      btnClear: document.getElementById('btnClearMarkers'),
+
+      // 【削除】btnClear: document.getElementById('btnClearMarkers'), は削除
 
       canvases: {
         input: document.getElementById('canvasInput'),
@@ -73,8 +72,6 @@ export class AppView {
     Object.values(this.els.canvases).forEach(c => c.style = canvasStyle);
   }
 
-  // --- Drawing Methods ---
-
   async redrawMarkers() {
     if (!this.state.markerBuffer) return;
     const { width, height, markerBuffer, labels } = this.state;
@@ -93,8 +90,6 @@ export class AppView {
     const { width, height, labels, inputData } = this.state;
     const imgData = this.els.ctx.output.createImageData(width, height);
     const data = imgData.data;
-
-    // 【修正】DOMではなく内部プロパティを参照
     const isTransparent = this.isTransparent;
 
     for (let i = 0; i < width * height; i++) {
@@ -135,8 +130,6 @@ export class AppView {
     this.els.canvases.marker.style.zIndex = 10;
   }
 
-  // --- UI Updates ---
-
   updatePaletteUI() {
     const container = this.els.palette;
     container.innerHTML = '';
@@ -172,6 +165,10 @@ export class AppView {
   setLoading(isLoading) {
     this.els.spinner.style.display = isLoading ? 'block' : 'none';
     this.els.btnAutoMark.disabled = isLoading;
+    // 【復活】Runボタンの制御
+    if (this.els.btnRun) {
+      this.els.btnRun.disabled = isLoading;
+    }
   }
 
   getParameters() {
@@ -185,8 +182,6 @@ export class AppView {
       isDynamic: this.els.chkDynamic.checked
     };
   }
-
-  // --- Transforms & Events ---
 
   setToolMode(mode) {
     this.state.toolMode = mode;
@@ -290,7 +285,6 @@ export class AppView {
   bindEvents() {
     const { viewport } = this.els;
 
-    // Drag & Drop
     ['dragenter', 'dragover'].forEach(evt => {
       viewport.addEventListener(evt, e => { e.preventDefault(); viewport.classList.add('drag-over'); });
     });
@@ -302,7 +296,6 @@ export class AppView {
       if (f) this.handlers.onFileLoad(f);
     });
 
-    // Paste
     window.addEventListener('paste', e => {
       const items = (e.clipboardData || e.originalEvent.clipboardData).items;
       for (const item of items) {
@@ -313,8 +306,10 @@ export class AppView {
       }
     });
 
-    // --- Buttons ---
     this.els.inpLoad.addEventListener('change', e => this.handlers.onLoadProject(e.target.files[0]));
+
+    // 【追加】Runボタンのイベント
+    this.els.btnRun.addEventListener('click', () => this.handlers.onRun());
 
     this.els.btnAutoMark.addEventListener('click', () => this.handlers.onAutoMark());
 
@@ -328,12 +323,8 @@ export class AppView {
 
     this.els.btnAddLabel.addEventListener('click', () => this.handlers.onAddLabel());
     this.els.btnDeleteLabel.addEventListener('click', () => this.handlers.onDeleteLabel());
-    this.els.btnClear.addEventListener('click', () => {
-      if (confirm("Clear all markers?")) {
-        this.handlers.onClearMarkers();
-        this.handlers.onRun();
-      }
-    });
+
+    // Clearボタンのイベントリスナーは削除しました
 
     this.els.colorPicker.addEventListener('input', e => this.handlers.onColorChange(e.target.value));
     this.els.alphaInput.addEventListener('input', e => this.handlers.onAlphaChange(e.target.value));
@@ -344,7 +335,6 @@ export class AppView {
       this.els.dispBrush.textContent = s;
     });
 
-    // Mouse
     viewport.addEventListener('wheel', e => {
       e.preventDefault();
       this.handleZoom(e);

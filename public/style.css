@@ -403,3 +403,28 @@ label {
     transform: rotate(360deg);
   }
 }
+
+.btn-prominent {
+  background-color: #ff9800;
+  /* オレンジ色 */
+  color: white;
+  font-weight: bold;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.btn-prominent:hover {
+  filter: brightness(0.9);
+}
+
+/* Runボタン (メインアクション) */
+#btnRun {
+  background-color: var(--color-accent);
+  /* 青色 */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+  /* 少し浮かせる */
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+#btnRun:hover {
+  filter: brightness(0.9);
+}
