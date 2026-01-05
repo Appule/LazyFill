@@ -25,19 +25,38 @@ function createWindow() {
     y: winState.y,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false // 今回の構成に合わせています
+      contextIsolation: false
     }
   });
 
   mainWindow.loadFile('public/index.html');
 
-  // --- メニューの定義 ---
+  // --- メニューの定義 (日本語版) ---
+  const isMac = process.platform === 'darwin';
+
   const template = [
+    // macOS用: アプリ名メニュー (About, Quit等)
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about', label: `${app.name}について` },
+        { type: 'separator' },
+        { role: 'services', label: 'サービス' },
+        { type: 'separator' },
+        { role: 'hide', label: `${app.name}を隠す` },
+        { role: 'hideOthers', label: 'ほかを隠す' },
+        { role: 'unhide', label: 'すべて表示' },
+        { type: 'separator' },
+        { role: 'quit', label: `${app.name}を終了` }
+      ]
+    }] : []),
+
+    // File -> ファイル
     {
-      label: 'File',
+      label: 'ファイル',
       submenu: [
         {
-          label: 'Open Project / Image',
+          label: 'プロジェクト/画像を開く',
           accelerator: 'CmdOrCtrl+O',
           click: async () => {
             const result = await dialog.showOpenDialog(mainWindow, {
@@ -48,85 +67,101 @@ function createWindow() {
             });
 
             if (!result.canceled && result.filePaths.length > 0) {
-              // 選択されたファイルのパスをレンダラーに送る
               mainWindow.webContents.send('menu-open-file', result.filePaths[0]);
             }
           }
         },
         {
-          label: 'Save Project',
+          label: 'プロジェクトを保存',
           accelerator: 'CmdOrCtrl+S',
           click: () => mainWindow.webContents.send('menu-save-project')
         },
         { type: 'separator' },
         {
-          label: 'Export Image',
+          label: '画像をエクスポート',
           accelerator: 'CmdOrCtrl+E',
           click: () => mainWindow.webContents.send('menu-export-image')
         },
         {
-          label: 'Export Mask',
+          label: 'マスクをエクスポート',
           click: () => mainWindow.webContents.send('menu-export-mask')
         },
         { type: 'separator' },
         {
-          label: 'Transparent Background',
+          label: '背景透過',
           type: 'checkbox',
-          checked: false, // 初期値（アプリ側の初期値と合わせてください）
+          checked: false,
           click: (menuItem) => {
             mainWindow.webContents.send('menu-toggle-transparent', menuItem.checked);
           }
         },
-        { type: 'separator' },
-        { role: 'quit' }
+        // Windows/Linux用: 終了ボタン
+        ...(isMac ? [] : [
+          { type: 'separator' },
+          { role: 'quit', label: '終了' }
+        ])
       ]
     },
+
+    // Edit -> 編集
     {
-      label: 'Edit',
+      label: '編集',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
+        // Undo/Redo/Copy/Paste等を削除し、カスタム機能のみ配置
         {
-          label: 'Clear Markers',
+          label: 'マーカーをクリア',
           click: () => mainWindow.webContents.send('menu-clear-markers')
         }
       ]
     },
+
+    // Settings -> 設定
     {
-      label: 'Settings',
+      label: '設定',
       submenu: [
         {
-          label: 'Show Advanced Settings',
+          label: '詳細設定を表示',
           type: 'checkbox',
+          id: 'menu-show-settings', // 【追加】IDを付与して後で参照できるようにする
           checked: false,
           click: (menuItem) => {
             mainWindow.webContents.send('menu-toggle-settings', menuItem.checked);
           }
         },
         { type: 'separator' },
-        { role: 'toggleDevTools' }
+        { role: 'toggleDevTools', label: '開発者ツール' }
       ]
     },
+
+    // View -> 表示
     {
-      label: 'View',
+      label: '表示',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'togglefullscreen' },
+        { role: 'reload', label: '再読み込み' },
+        { role: 'forceReload', label: '強制再読み込み' },
+        { role: 'togglefullscreen', label: '全画面表示' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' }
+        // 【修正】標準のrole: 'resetZoom'ではなく、カスタムIPCを送る
+        {
+          label: 'ズームリセット (100%)',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => mainWindow.webContents.send('menu-reset-zoom')
+        }
+        // 拡大・縮小メニューは削除しました
       ]
     }
   ];
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
+
+  // 【追加】レンダラーからの同期リクエストを受信してメニューを更新
+  ipcMain.on('sync-settings-menu', (event, isVisible) => {
+    const item = Menu.getApplicationMenu().getMenuItemById('menu-show-settings');
+    if (item) {
+      item.checked = isVisible;
+    }
+  });
 
   // --- ウィンドウ状態保存 ---
   const saveState = () => {

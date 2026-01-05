@@ -10,8 +10,8 @@ export class AppView {
     this.isPanning = false;
     this.lastMousePos = { x: 0, y: 0 };
     this.drawing = false;
-
     this.isTransparent = false;
+    this.zoomStepRatio = 0.1;
 
     this.els = {
       viewport: document.getElementById('viewport'),
@@ -19,6 +19,9 @@ export class AppView {
       dropMessage: document.getElementById('drop-message'),
       inpLoad: document.getElementById('inpLoad'),
       panelParams: document.getElementById('panel-params'),
+      btnCloseParams: document.getElementById('btnCloseParams'),
+      inpZoomLevel: document.getElementById('inpZoomLevel'),
+      inpZoomStep: document.getElementById('inpZoomStep'),
 
       inputs: {
         bb: document.getElementById('inpBB'),
@@ -47,8 +50,6 @@ export class AppView {
       currentLabelName: document.getElementById('currentLabelName'),
       btnAddLabel: document.getElementById('btnAddLabel'),
       btnDeleteLabel: document.getElementById('btnDeleteLabel'),
-
-      // 【削除】btnClear: document.getElementById('btnClearMarkers'), は削除
 
       canvases: {
         input: document.getElementById('canvasInput'),
@@ -228,36 +229,49 @@ export class AppView {
     this.updateTransform();
   }
 
+  // --- Zoom Logic ---
+
   updateTransform() {
     const { x, y, scale } = this.transform;
     this.els.canvasContainer.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+
+    // 現在の倍率を表示 (フォーカス中でない時だけ更新して入力を邪魔しない)
+    if (document.activeElement !== this.els.inpZoomLevel) {
+      this.els.inpZoomLevel.value = Math.round(scale * 100);
+    }
   }
 
   handleZoom(e) {
     if (!this.state.isImageLoaded) return;
-    const ZOOM_FACTOR = 1.1;
+    const factor = 1 + this.zoomStepRatio;
     const direction = e.deltaY > 0 ? -1 : 1;
-    const factor = direction > 0 ? ZOOM_FACTOR : (1 / ZOOM_FACTOR);
-    let newScale = Math.max(0.01, Math.min(this.transform.scale * factor, 100.0));
+    const multiplier = direction > 0 ? factor : (1 / factor);
+
+    let newScale = this.transform.scale * multiplier;
+    newScale = Math.max(0.01, Math.min(newScale, 100.0));
 
     const rectViewport = this.els.viewport.getBoundingClientRect();
     const vpMouseX = e.clientX - rectViewport.left;
     const vpMouseY = e.clientY - rectViewport.top;
     const oldX = this.transform.x;
     const oldY = this.transform.y;
-    const scaleRatio = newScale / this.transform.scale;
 
+    const scaleRatio = newScale / this.transform.scale;
     this.transform.x = vpMouseX - (vpMouseX - oldX) * scaleRatio;
     this.transform.y = vpMouseY - (vpMouseY - oldY) * scaleRatio;
     this.transform.scale = newScale;
+
     this.updateTransform();
   }
 
+  // 手動入力およびリセット時のズーム処理
   setZoomManual(newScale) {
     if (!this.state.isImageLoaded) return;
     newScale = Math.max(0.01, Math.min(newScale, 100.0));
+
     const oldScale = this.transform.scale;
     const scaleRatio = newScale / oldScale;
+
     const vpW = this.els.viewport.clientWidth;
     const vpH = this.els.viewport.clientHeight;
     const centerX = vpW / 2;
@@ -268,7 +282,14 @@ export class AppView {
     this.transform.x = centerX - (centerX - oldX) * scaleRatio;
     this.transform.y = centerY - (centerY - oldY) * scaleRatio;
     this.transform.scale = newScale;
+
     this.updateTransform();
+  }
+
+  // 【追加】ズームを100%にリセット
+  resetZoomTo100() {
+    if (!this.state.isImageLoaded) return;
+    this.setZoomManual(1.0);
   }
 
   getCanvasCoordinates(e) {
@@ -280,6 +301,15 @@ export class AppView {
     const x = Math.floor(relX / actualScale);
     const y = Math.floor(relY / actualScale);
     return { x, y };
+  }
+
+  // 【追加】設定パネルの表示切替ヘルパー
+  toggleSettingsPanel(show) {
+    if (show) {
+      this.els.panelParams.classList.remove('hidden');
+    } else {
+      this.els.panelParams.classList.add('hidden');
+    }
   }
 
   bindEvents() {
@@ -306,9 +336,36 @@ export class AppView {
       }
     });
 
+    // 【修正】ズームの手入力イベント (changeで確定時に反映)
+    this.els.inpZoomLevel.addEventListener('change', e => {
+      let percent = parseFloat(e.target.value);
+      if (isNaN(percent) || percent <= 0) percent = 100;
+      this.setZoomManual(percent / 100.0);
+    });
+
+    // 【修正】ズームステップのイベント (詳細設定パネル内)
+    this.els.inpZoomStep.addEventListener('change', e => {
+      let step = parseFloat(e.target.value);
+      if (isNaN(step) || step <= 0) step = 10;
+      this.zoomStepRatio = step / 100.0;
+    });
+
     this.els.inpLoad.addEventListener('change', e => this.handlers.onLoadProject(e.target.files[0]));
 
-    // 【追加】Runボタンのイベント
+    // --- Buttons ---
+    this.els.inpLoad.addEventListener('change', e => this.handlers.onLoadProject(e.target.files[0]));
+
+    // 【追加】設定パネルの×ボタン
+    this.els.btnCloseParams.addEventListener('click', () => {
+      // ハンドラ経由で閉じる (main.jsでメニュー同期を行うため)
+      if (this.handlers.onCloseSettings) {
+        this.handlers.onCloseSettings();
+      } else {
+        // フォールバック (もしハンドラ未定義ならViewだけで閉じる)
+        this.toggleSettingsPanel(false);
+      }
+    });
+
     this.els.btnRun.addEventListener('click', () => this.handlers.onRun());
 
     this.els.btnAutoMark.addEventListener('click', () => this.handlers.onAutoMark());
@@ -324,8 +381,6 @@ export class AppView {
     this.els.btnAddLabel.addEventListener('click', () => this.handlers.onAddLabel());
     this.els.btnDeleteLabel.addEventListener('click', () => this.handlers.onDeleteLabel());
 
-    // Clearボタンのイベントリスナーは削除しました
-
     this.els.colorPicker.addEventListener('input', e => this.handlers.onColorChange(e.target.value));
     this.els.alphaInput.addEventListener('input', e => this.handlers.onAlphaChange(e.target.value));
 
@@ -333,6 +388,44 @@ export class AppView {
       const s = parseInt(e.target.value);
       this.state.brushSize = s;
       this.els.dispBrush.textContent = s;
+    });
+
+    // 【追加】フッターのズームステップ設定イベント (Enter対応)
+    this.els.inpZoomStep.addEventListener('change', e => {
+      let step = parseFloat(e.target.value);
+      if (isNaN(step) || step <= 0) step = 10;
+      this.zoomStepRatio = step / 100.0;
+    });
+    this.els.inpZoomStep.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.els.inpZoomStep.blur();
+      }
+    });
+
+    // ---------------------------------------------------------
+    // 【追加】詳細設定パネルの各パラメータ入力欄の一括設定
+    // ---------------------------------------------------------
+    Object.values(this.els.inputs).forEach(inputEl => {
+      if (!inputEl) return;
+
+      // 1. Enterキーで確定 (フォーカスを外す -> changeイベント発火)
+      inputEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          inputEl.blur();
+        }
+      });
+
+      // 2. 値変更時に自動更新がONなら再実行
+      inputEl.addEventListener('change', () => {
+        // Runボタンが存在し、かつ自動更新がONの場合のみ実行
+        if (this.els.chkDynamic && this.els.chkDynamic.checked) {
+          if (this.handlers.onRun) {
+            this.handlers.onRun();
+          }
+        }
+      });
     });
 
     viewport.addEventListener('wheel', e => {
@@ -383,6 +476,28 @@ export class AppView {
       } else if (this.drawing && e.button === 0) {
         this.drawing = false;
         this.handlers.onDrawEnd();
+      }
+    });
+
+    // --- Zoom Events ---
+
+    // 1. changeイベント (フォーカスが外れた時やスピンボタン操作時)
+    this.els.inpZoomLevel.addEventListener('change', e => {
+      let percent = parseFloat(e.target.value);
+      if (isNaN(percent) || percent <= 0) percent = 100;
+      this.setZoomManual(percent / 100.0);
+    });
+
+    // 2. 【追加】keydownイベント (Enterキーで即時反映)
+    this.els.inpZoomLevel.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault(); // フォーム送信などを防ぐ
+        this.els.inpZoomLevel.blur(); // フォーカスを外して change イベントも誘発させる
+
+        // 明示的に適用
+        let percent = parseFloat(e.target.value);
+        if (isNaN(percent) || percent <= 0) percent = 100;
+        this.setZoomManual(percent / 100.0);
       }
     });
 

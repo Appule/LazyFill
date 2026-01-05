@@ -389,6 +389,22 @@ export async function main() {
       } else {
         view.els.panelParams.classList.add('hidden');
       }
+    },
+
+    // 【追加】設定パネルを閉じる処理 (×ボタン用)
+    onCloseSettings: () => {
+      // 1. Viewを更新
+      view.toggleSettingsPanel(false);
+
+      // 2. メインプロセス(メニューバー)に同期信号を送る
+      if (ipcRenderer) {
+        ipcRenderer.send('sync-settings-menu', false);
+      }
+    },
+
+    // 既存のメニューからのトグル処理
+    onMenuToggleSettings: (isVisible) => {
+      view.toggleSettingsPanel(isVisible);
     }
   };
 
@@ -416,6 +432,10 @@ export async function main() {
         console.error("File open error:", err);
         alert("ファイルを開けませんでした: " + err.message);
       }
+    });
+
+    ipcRenderer.on('menu-reset-zoom', () => {
+      view.resetZoomTo100();
     });
 
     ipcRenderer.on('menu-save-project', () => handlers.onSaveProject());
