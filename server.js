@@ -84,18 +84,19 @@ function createWindow() {
         },
         {
           label: 'マスクをエクスポート',
+          accelerator: 'CmdOrCtrl+M', // 【追加】ショートカット
           click: () => mainWindow.webContents.send('menu-export-mask')
         },
         { type: 'separator' },
         {
           label: '背景透過',
           type: 'checkbox',
+          accelerator: 'CmdOrCtrl+T', // 【追加】ショートカット
           checked: false,
           click: (menuItem) => {
             mainWindow.webContents.send('menu-toggle-transparent', menuItem.checked);
           }
         },
-        // Windows/Linux用: 終了ボタン
         ...(isMac ? [] : [
           { type: 'separator' },
           { role: 'quit', label: '終了' }
@@ -103,14 +104,38 @@ function createWindow() {
       ]
     },
 
-    // Edit -> 編集
+    // Edit -> 編集 (変更なし)
     {
       label: '編集',
       submenu: [
-        // Undo/Redo/Copy/Paste等を削除し、カスタム機能のみ配置
         {
           label: 'マーカーをクリア',
           click: () => mainWindow.webContents.send('menu-clear-markers')
+        }
+      ]
+    },
+
+    // View -> 表示
+    {
+      label: '表示',
+      submenu: [
+        { role: 'togglefullscreen', label: '全画面表示' },
+        { type: 'separator' },
+        {
+          label: 'ズームリセット (100%)',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => mainWindow.webContents.send('menu-reset-zoom')
+        },
+        // 【修正】標準機能ではなくカスタムメッセージを送る
+        {
+          label: '拡大 (2倍)',
+          accelerator: 'CmdOrCtrl+Plus', // 一般的なショートカットを割り当てておきます
+          click: () => mainWindow.webContents.send('menu-zoom-in-2x')
+        },
+        {
+          label: '縮小 (1/2倍)',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => mainWindow.webContents.send('menu-zoom-out-2x')
         }
       ]
     },
@@ -122,32 +147,24 @@ function createWindow() {
         {
           label: '詳細設定を表示',
           type: 'checkbox',
-          id: 'menu-show-settings', // 【追加】IDを付与して後で参照できるようにする
+          id: 'menu-show-settings',
+          accelerator: 'CmdOrCtrl+I', // 【追加】ショートカット
           checked: false,
           click: (menuItem) => {
             mainWindow.webContents.send('menu-toggle-settings', menuItem.checked);
           }
-        },
-        { type: 'separator' },
-        { role: 'toggleDevTools', label: '開発者ツール' }
+        }
       ]
     },
 
-    // View -> 表示
+    // 【新設】Debug -> デバッグ
     {
-      label: '表示',
+      label: 'デバッグ',
       submenu: [
         { role: 'reload', label: '再読み込み' },
         { role: 'forceReload', label: '強制再読み込み' },
-        { role: 'togglefullscreen', label: '全画面表示' },
         { type: 'separator' },
-        // 【修正】標準のrole: 'resetZoom'ではなく、カスタムIPCを送る
-        {
-          label: 'ズームリセット (100%)',
-          accelerator: 'CmdOrCtrl+0',
-          click: () => mainWindow.webContents.send('menu-reset-zoom')
-        }
-        // 拡大・縮小メニューは削除しました
+        { role: 'toggleDevTools', label: '開発者ツール' }
       ]
     }
   ];

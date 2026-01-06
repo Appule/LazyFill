@@ -1,6 +1,6 @@
 {
   "name": "lazyfill",
-  "version": "1.18.4",
+  "version": "1.18.8",
   "main": "server.js",
   "scripts": {
     "start": "electron .",

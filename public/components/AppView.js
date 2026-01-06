@@ -286,10 +286,21 @@ export class AppView {
     this.updateTransform();
   }
 
-  // 【追加】ズームを100%にリセット
   resetZoomTo100() {
     if (!this.state.isImageLoaded) return;
     this.setZoomManual(1.0);
+  }
+
+  // 【追加】2倍ズーム
+  zoomIn2x() {
+    if (!this.state.isImageLoaded) return;
+    this.setZoomManual(this.transform.scale * 2.0);
+  }
+
+  // 【追加】1/2倍ズーム
+  zoomOut2x() {
+    if (!this.state.isImageLoaded) return;
+    this.setZoomManual(this.transform.scale * 0.5);
   }
 
   getCanvasCoordinates(e) {

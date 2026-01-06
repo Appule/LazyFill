@@ -133,15 +133,13 @@ canvas {
 /* --- Tool Palette (Right Side) --- */
 #panel-tools {
   top: 20px;
-  /* 上に詰める */
   right: 20px;
   width: 320px;
 
-  /* 【追加】画面からはみ出さないようにスクロール設定 */
-  max-height: calc(100vh - 40px);
-  /* 上下マージン分引く */
+  /* 【修正】上余白(20) + フッター(30) + 下余白(20) = 70px 程度引く */
+  max-height: calc(100vh - 80px);
+
   overflow-y: auto;
-  /* 内容が多い場合はスクロール */
   display: flex;
   flex-direction: column;
 }
@@ -149,10 +147,12 @@ canvas {
 /* --- Parameters (Left Side) --- */
 #panel-params {
   top: 20px;
-  /* 上に詰める */
   left: 20px;
   width: 300px;
-  max-height: calc(100vh - 40px);
+
+  /* 【修正】こちらも同様に調整 */
+  max-height: calc(100vh - 80px);
+
   overflow-y: auto;
 }
 
@@ -380,8 +380,15 @@ label {
 
 #loadingSpinner {
   position: absolute;
-  bottom: 20px;
-  right: 20px;
+  top: 50%;
+  left: 50%;
+  /* 回転アニメーションのtransformと競合しないよう、マージンで調整するか、ラッパーを使うのが一般的ですが
+     ここでは簡易的に margin-top/left で調整します（transformはアニメーションで使用中のため） */
+  margin-top: -15px;
+  /* heightの半分 */
+  margin-left: -15px;
+  /* widthの半分 */
+
   width: 30px;
   height: 30px;
   border: 4px solid rgba(255, 255, 255, 0.3);
@@ -391,7 +398,6 @@ label {
   z-index: 2000;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   display: none;
-  /* 初期状態は非表示 */
 }
 
 @keyframes spin {

@@ -327,7 +327,7 @@ export async function main() {
                 state.isMarkerDirty = true;
                 view.redrawMarkers();
                 handlers.onRun();
-                alert("読み込み完了");
+                console.log("Project loaded.");
               };
               imgMarkers.src = json.markers;
             }
@@ -347,6 +347,11 @@ export async function main() {
               const img = await loadImage(json.imagePath);
               view.resizeCanvases(img.width, img.height);
 
+              // 【追加】プロジェクト読み込み成功時もメッセージを消す
+              if (view.els.dropMessage) {
+                view.els.dropMessage.style.display = 'none';
+              }
+
               const cvs = document.createElement('canvas');
               cvs.width = img.width; cvs.height = img.height;
               const c = cvs.getContext('2d');
@@ -361,6 +366,7 @@ export async function main() {
               vData.data.set(rgba);
               vCtx.putImageData(vData, 0, 0);
 
+              view.updatePaletteUI();
               view.updateLayerVisibility();
               applyProjectData();
 
@@ -436,6 +442,16 @@ export async function main() {
 
     ipcRenderer.on('menu-reset-zoom', () => {
       view.resetZoomTo100();
+    });
+
+    // 【追加】2倍拡大
+    ipcRenderer.on('menu-zoom-in-2x', () => {
+      view.zoomIn2x();
+    });
+
+    // 【追加】1/2倍縮小
+    ipcRenderer.on('menu-zoom-out-2x', () => {
+      view.zoomOut2x();
     });
 
     ipcRenderer.on('menu-save-project', () => handlers.onSaveProject());

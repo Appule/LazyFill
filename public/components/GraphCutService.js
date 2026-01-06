@@ -13,7 +13,7 @@ export const GraphCutService = {
 
     const { width, height, markerBuffer } = state;
     const numPixels = width * height;
-    const targetId = 2;
+    const targetId = state.currentLabelId;
 
     let minX = width, minY = height, maxX = 0, maxY = 0;
     let hasContent = false;
